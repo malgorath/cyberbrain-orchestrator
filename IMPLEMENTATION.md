@@ -41,11 +41,11 @@ A Django 5-based orchestration system for managing Docker container tasks with D
 - ✅ Modern gradient design with hover effects
 
 ### 5. Docker Configuration
-- ✅ **Dockerfile**: Multi-stage build with Python 3.12-slim
+- ✅ **Dockerfile**: Multi-stage build with Python 3.12-slim, ASGI (Daphne) support
 - ✅ **docker-compose.yml**: 
   - PostgreSQL 16 Alpine with health checks
-  - Django web service with gunicorn
-  - Exposed on 192.168.1.3:9595
+  - Django web service with Daphne ASGI
+  - Exposed on HOST IP:9595 (generic port binding)
   - Volume mounts:
     - Application code → /app
     - CYBER_BRAIN_LOGS → /logs
@@ -198,7 +198,7 @@ cyberbrain-orchestrator/
 4. **Start services**: `docker compose up -d`
 5. **Run migrations**: `docker compose exec web python manage.py migrate`
 6. **Create superuser**: `docker compose exec web python manage.py createsuperuser`
-7. **Access**: http://192.168.1.3:9595/
+7. **Access**: http://<UNRAID_HOST>:9595/
 
 ## 🔒 Security Notes
 
@@ -225,8 +225,8 @@ cyberbrain-orchestrator/
 This implementation successfully delivers a complete Django 5-based orchestrator system that meets all requirements:
 - ✅ Django 5 + DRF with PostgreSQL
 - ✅ Simple WebUI for management
-- ✅ Docker Compose setup with proper networking
-- ✅ Exposed on 192.168.1.3:9595
+- ✅ Docker Compose setup with generic port binding
+- ✅ Exposed on HOST IP:9595 (all interfaces)
 - ✅ Volume mounts for logs and uploads
 - ✅ Docker socket access for container management
 - ✅ All required database models
@@ -234,6 +234,7 @@ This implementation successfully delivers a complete Django 5-based orchestrator
 - ✅ Three task types: log_triage, gpu_report, service_map
 - ✅ No prompt storage (token counts only)
 - ✅ Container allowlist security
+- ✅ MCP control-plane API with SSE streaming
 - ✅ Optional debug mode
 - ✅ Comprehensive documentation
 - ✅ All tests passing

@@ -2,8 +2,10 @@
 
 ## Base URL
 ```
-http://192.168.1.3:9595/api/
+http://<UNRAID_HOST>:9595/api/
 ```
+
+Replace `<UNRAID_HOST>` with your Unraid LAN IP (e.g., `192.168.1.3`) or hostname.
 
 ## Authentication
 Currently, the API is open (AllowAny permission). In production, you should implement proper authentication.
@@ -149,16 +151,14 @@ Content-Type: application/json
 }
 ```
 
-**Example: Launch all tasks**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<UNRAID_HOST>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
-**Example: Launch specific tasks**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<UNRAID_HOST>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["log_triage", "gpu_report"]}'
 ```
@@ -257,7 +257,7 @@ GET /api/jobs/
 
 **Example:**
 ```bash
-curl http://192.168.1.3:9595/api/jobs/?run=1
+curl http://<UNRAID_HOST>:9595/api/jobs/?run=1
 ```
 
 #### Get Job Details
@@ -308,7 +308,7 @@ Content-Type: application/json
 
 **Example:**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/containers/ \
+curl -X POST http://<UNRAID_HOST>:9595/api/containers/ \
   -H "Content-Type: application/json" \
   -d '{
     "container_id": "abc123def456",
@@ -325,7 +325,7 @@ PATCH /api/containers/{id}/
 
 **Example: Deactivate container**
 ```bash
-curl -X PATCH http://192.168.1.3:9595/api/containers/1/ \
+curl -X PATCH http://<UNRAID_HOST>:9595/api/containers/1/ \
   -H "Content-Type: application/json" \
   -d '{"is_active": false}'
 ```
@@ -375,7 +375,7 @@ python manage.py run_orchestrator <run_id>
 
 Access the web interface at:
 ```
-http://192.168.1.3:9595/
+http://<UNRAID_HOST>:9595/
 ```
 
 The WebUI provides:

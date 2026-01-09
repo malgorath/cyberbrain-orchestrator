@@ -8,66 +8,65 @@ from .models import (
 
 @admin.register(Directive)
 class DirectiveAdmin(admin.ModelAdmin):
-    list_display = ['id', 'directive_type', 'name', 'version', 'is_active', 'created_at']
-    list_filter = ['directive_type', 'is_active', 'created_at']
+    list_display = ['id', 'directive_type', 'name', 'is_builtin', 'version', 'is_active', 'created_at']
+    list_filter = ['directive_type', 'is_builtin', 'is_active', 'created_at']
     search_fields = ['name', 'description']
     readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ['id', 'task_type', 'name', 'is_active', 'created_at']
-    list_filter = ['task_type', 'is_active']
+    list_display = ['id', 'task_key', 'default_directive', 'name', 'is_active', 'created_at']
+    list_filter = ['task_key', 'default_directive', 'is_active']
     search_fields = ['name', 'description']
     readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(Run)
 class RunAdmin(admin.ModelAdmin):
-    list_display = ['id', 'status', 'started_at', 'completed_at', 'total_tokens']
-    list_filter = ['status', 'started_at']
-    readonly_fields = ['started_at', 'completed_at', 'total_prompt_tokens', 
-                      'total_completion_tokens', 'total_tokens']
-    search_fields = ['error_message']
+    list_display = ['id', 'job', 'status', 'started_at', 'ended_at', 'token_total']
+    list_filter = ['status', 'started_at', 'ended_at']
+    readonly_fields = ['started_at', 'ended_at', 'token_prompt',
+                      'token_completion', 'token_total']
+    search_fields = ['error_message', 'directive_snapshot_name']
 
 
 @admin.register(RunJob)
 class RunJobAdmin(admin.ModelAdmin):
     list_display = ['id', 'run', 'job', 'status', 'started_at', 'completed_at', 'total_tokens']
-    list_filter = ['status', 'job__task_type']
+    list_filter = ['status', 'job__task_key']
     readonly_fields = ['started_at', 'completed_at']
     search_fields = ['error_message']
 
 
 @admin.register(LLMCall)
 class LLMCallAdmin(admin.ModelAdmin):
-    list_display = ['id', 'run_job', 'model_id', 'endpoint', 'total_tokens', 
-                   'success', 'created_at']
-    list_filter = ['model_id', 'success', 'created_at']
+    list_display = ['id', 'run', 'worker_id', 'model_id', 'endpoint', 'total_tokens', 'created_at']
+    list_filter = ['endpoint', 'model_id', 'created_at']
     readonly_fields = ['created_at']
-    search_fields = ['endpoint', 'model_id', 'error_type']
+    search_fields = ['endpoint', 'model_id', 'worker_id']
 
 
 @admin.register(RunArtifact)
 class RunArtifactAdmin(admin.ModelAdmin):
-    list_display = ['id', 'run', 'artifact_type', 'file_path', 'file_size_bytes', 'created_at']
+    list_display = ['id', 'run', 'artifact_type', 'path', 'file_size_bytes', 'created_at']
     list_filter = ['artifact_type', 'created_at']
     readonly_fields = ['created_at']
-    search_fields = ['file_path', 'description']
+    search_fields = ['path', 'description']
 
 
 @admin.register(ContainerInventory)
 class ContainerInventoryAdmin(admin.ModelAdmin):
-    list_display = ['id', 'container_name', 'container_id', 'snapshot_at', 'run']
-    list_filter = ['snapshot_at']
-    readonly_fields = ['snapshot_at']
+    list_display = ['id', 'container_name', 'container_id', 'created_at', 'run']
+    list_filter = ['created_at']
+    readonly_fields = ['created_at']
     search_fields = ['container_id', 'container_name']
 
 
 @admin.register(ContainerAllowlist)
 class ContainerAllowlistAdmin(admin.ModelAdmin):
-    list_display = ['container_id', 'container_name', 'is_active', 'created_at']
-    list_filter = ['is_active', 'created_at']
+    list_display = ['container_id', 'container_name', 'enabled', 'created_at']
+    list_filter = ['enabled', 'created_at']
     readonly_fields = ['created_at', 'updated_at']
     search_fields = ['container_id', 'container_name', 'description']
 

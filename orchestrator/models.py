@@ -33,6 +33,33 @@ class Run(models.Model):
     report_markdown = models.TextField(blank=True)
     report_json = models.JSONField(default=dict)
     error_message = models.TextField(blank=True)
+    
+    # Phase 3: RAG integration toggle
+    use_rag = models.BooleanField(
+        default=False,
+        help_text='If True, perform RAG retrieval before LLM calls in this run'
+    )
+    
+    # Phase 4: Approval gating for D3/D4 directives
+    APPROVAL_CHOICES = [
+        ('none', 'No Approval Required'),
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+    ]
+    approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default='none')
+    approved_by = models.CharField(max_length=255, blank=True, help_text='Username or identifier of approver')
+    approved_at = models.DateTimeField(null=True, blank=True)
+    
+    # Phase 7: Multi-host worker assignment
+    worker_host = models.ForeignKey(
+        'core.WorkerHost',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='runs',
+        help_text='Worker host assigned to execute this run'
+    )
 
     class Meta:
         ordering = ['-started_at']
@@ -54,6 +81,7 @@ class Job(models.Model):
         ('log_triage', 'Log Triage'),
         ('gpu_report', 'GPU Report'),
         ('service_map', 'Service Map'),
+        ('repo_copilot_plan', 'Repo Co-Pilot Plan'),  # Phase 6: Repo Co-Pilot
     ]
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name='jobs')

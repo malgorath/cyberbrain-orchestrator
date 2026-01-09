@@ -16,8 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from mcp.views import mcp_endpoint
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('mcp', mcp_endpoint, name='mcp-endpoint'),
     path('', include('orchestrator.urls')),
+    path('', include('webui.urls')),
 ]

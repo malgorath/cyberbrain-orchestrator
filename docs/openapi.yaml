@@ -1,0 +1,400 @@
+openapi: 3.0.3
+info:
+  title: Cyberbrain Orchestrator API
+  version: 1.0.0
+  description: |
+    Django 5 orchestration system for managing Docker container tasks with DRF API.
+
+    ## Features
+    - **Run Management**: Launch and track orchestrator runs
+    - **Task Execution**: Execute workflows (log triage, GPU reporting, service mapping)
+    - **Token Accounting**: Track LLM API usage and costs
+    - **Artifact Management**: Store and retrieve task outputs
+    - **Metrics**: Prometheus-compatible metrics endpoint
+    - **Container Integration**: Docker socket integration with allowlist security
+
+    ## Security
+    - All container access requires allowlist approval
+    - LLM content is NEVER stored (token counts only)
+    - Artifacts restricted to /logs directory
+    - DEBUG_REDACTED_MODE prevents sensitive data leakage
+
+  contact:
+    name: Cyberbrain Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:9595
+    description: Development server
+  - url: http://{host}:9595
+    description: Custom deployment
+    variables:
+      host:
+        default: localhost
+        description: Server hostname or IP
+
+paths:
+  /api/runs/:
+    get:
+      summary: List runs
+      operationId: listRuns
+      tags:
+        - Runs
+      responses:
+        '200':
+          description: List of runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunList'
+    
+  /api/runs/{id}/:
+    get:
+      summary: Get run details
+      operationId: getRunDetail
+      tags:
+        - Runs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Run details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '404':
+          description: Run not found
+  
+  /api/runs/launch/:
+    post:
+      summary: Launch a new run
+      operationId: launchRun
+      tags:
+        - Runs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LaunchRequest'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+        '400':
+          description: Invalid request
+  
+  /api/runs/{id}/artifacts/:
+    get:
+      summary: List artifacts for a run
+      operationId: listRunArtifacts
+      tags:
+        - Artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of artifacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Artifact'
+  
+  /api/artifacts/:
+    get:
+      summary: List all artifacts
+      operationId: listArtifacts
+      tags:
+        - Artifacts
+      responses:
+        '200':
+          description: List of artifacts
+  
+  /api/artifacts/{id}/:
+    get:
+      summary: Get artifact details
+      operationId: getArtifact
+      tags:
+        - Artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Artifact details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+  
+  /api/artifacts/{id}/download/:
+    get:
+      summary: Download artifact file
+      operationId: downloadArtifact
+      tags:
+        - Artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Artifact file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Artifact not found
+  
+  /api/token-stats/:
+    get:
+      summary: Get token statistics
+      operationId: getTokenStats
+      tags:
+        - Token Accounting
+      responses:
+        '200':
+          description: Token statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenStats'
+  
+  /api/cost-report/:
+    get:
+      summary: Get cost breakdown by model
+      operationId: getCostReport
+      tags:
+        - Token Accounting
+      responses:
+        '200':
+          description: Cost report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostReport'
+  
+  /api/usage-by-directive/:
+    get:
+      summary: Get token usage by directive
+      operationId: getUsageByDirective
+      tags:
+        - Token Accounting
+      responses:
+        '200':
+          description: Usage by directive
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DirectiveUsage'
+  
+  /metrics/:
+    get:
+      summary: Prometheus metrics (text format)
+      operationId: getMetrics
+      tags:
+        - Observability
+      responses:
+        '200':
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+  
+  /metrics/json/:
+    get:
+      summary: Metrics (JSON format)
+      operationId: getMetricsJSON
+      tags:
+        - Observability
+      responses:
+        '200':
+          description: Metrics in JSON format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsJSON'
+
+components:
+  schemas:
+    RunList:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [pending, running, completed, failed, success, partial]
+        created_at:
+          type: string
+          format: date-time
+        job_count:
+          type: integer
+    
+    Run:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+          enum: [pending, running, completed, failed, success, partial]
+        created_at:
+          type: string
+          format: date-time
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+    
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        task_type:
+          type: string
+          enum: [log_triage, gpu_report, service_map]
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+    
+    LaunchRequest:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            type: string
+            enum: [log_triage, gpu_report, service_map]
+          default: [log_triage, gpu_report, service_map]
+        directive_id:
+          type: integer
+          nullable: true
+    
+    Artifact:
+      type: object
+      properties:
+        id:
+          type: integer
+        run:
+          type: integer
+        artifact_type:
+          type: string
+        path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    
+    TokenStats:
+      type: object
+      properties:
+        total_tokens:
+          type: integer
+        total_prompt_tokens:
+          type: integer
+        total_completion_tokens:
+          type: integer
+        call_count:
+          type: integer
+    
+    CostReport:
+      type: object
+      properties:
+        total_cost:
+          type: number
+          format: float
+        by_model:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              tokens:
+                type: integer
+              calls:
+                type: integer
+              estimated_cost:
+                type: number
+                format: float
+        note:
+          type: string
+    
+    DirectiveUsage:
+      type: object
+      properties:
+        directive_name:
+          type: string
+        total_tokens:
+          type: integer
+        call_count:
+          type: integer
+    
+    MetricsJSON:
+      type: object
+      properties:
+        counters:
+          type: object
+          additionalProperties:
+            type: integer
+        gauges:
+          type: object
+          additionalProperties:
+            type: number
+        histograms:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              count:
+                type: integer
+              sum:
+                type: number
+              min:
+                type: number
+              max:
+                type: number
+              avg:
+                type: number
+
+tags:
+  - name: Runs
+    description: Run management and execution
+  - name: Artifacts
+    description: Task output artifacts
+  - name: Token Accounting
+    description: LLM token usage and costs
+  - name: Observability
+    description: Metrics and monitoring

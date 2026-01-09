@@ -152,7 +152,7 @@ class WorkerOrchestrator:
             'labels': {
                 'cyberbrain.run_job_id': str(run_job.id),
                 'cyberbrain.run_id': str(run_job.run.id),
-                'cyberbrain.task_type': run_job.job.task_type,
+                'cyberbrain.task_key': run_job.job.task_key,
                 'cyberbrain.ephemeral': 'true'
             }
         }
@@ -359,7 +359,7 @@ class WorkerOrchestrator:
                     'image': container.image.tags[0] if container.image.tags else 'unknown',
                     'status': container.status,
                     'run_job_id': container.labels.get('cyberbrain.run_job_id'),
-                    'task_type': container.labels.get('cyberbrain.task_type'),
+                    'task_key': container.labels.get('cyberbrain.task_key'),
                     'created': container.attrs['Created']
                 })
             

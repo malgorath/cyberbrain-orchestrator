@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Upload</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
+    h1 { margin-bottom: 10px; }
+    .upload-section { margin-bottom: 30px; padding: 20px; background: #f9f9f9; border: 1px solid #ddd; }
+    .upload-section input[type="file"] { margin-right: 10px; }
+    .status-section { margin-top: 30px; }
+    button { padding: 8px 16px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; }
+    .status-queued { color: #666; }
+    .status-processing { color: #ff9800; font-weight: bold; }
+    .status-ready { color: #4caf50; font-weight: bold; }
+    .status-failed { color: #f44336; font-weight: bold; }
+    .error-msg { color: #f44336; font-size: 0.9em; margin-top: 5px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { margin-right: 15px; text-decoration: none; color: #1976d2; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/webui/schedules/">Schedules</a>
+    <a href="/webui/rag/upload/">RAG Upload</a>
+    <a href="/webui/rag/search/">RAG Search</a>
+  </div>
+
+  <h1>RAG Upload</h1>
+  
+  <div class="upload-section">
+    <h2>Upload File for Ingestion</h2>
+    <p>Supported formats: .txt, .md, .json, .pdf, .docx</p>
+    <input type="file" id="fileInput" accept=".txt,.md,.json,.pdf,.docx" />
+    <button onclick="uploadFile()">Upload</button>
+    <div id="uploadStatus" style="margin-top: 10px;"></div>
+  </div>
+
+  <div class="status-section">
+    <h2>Upload Status</h2>
+    <button onclick="refreshStatus()">Refresh</button>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Filename</th>
+          <th>Size (bytes)</th>
+          <th>MIME Type</th>
+          <th>Status</th>
+          <th>Uploaded At</th>
+          <th>Processed At</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="statusRows">
+        <tr><td colspan="8">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    async function uploadFile() {
+      const fileInput = document.getElementById('fileInput');
+      const statusDiv = document.getElementById('uploadStatus');
+      
+      if (!fileInput.files.length) {
+        statusDiv.innerHTML = '<span style="color: red;">Please select a file</span>';
+        return;
+      }
+      
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      
+      statusDiv.innerHTML = '<span style="color: #666;">Uploading...</span>';
+      
+      try {
+        const res = await fetch('/api/rag/upload/', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          statusDiv.innerHTML = `<span style="color: green;">✓ Uploaded successfully! ID: ${data.id}, Status: ${data.status}</span>`;
+          fileInput.value = '';
+          setTimeout(refreshStatus, 500);
+        } else {
+          const error = await res.text();
+          statusDiv.innerHTML = `<span style="color: red;">✗ Upload failed: ${error}</span>`;
+        }
+      } catch (err) {
+        statusDiv.innerHTML = `<span style="color: red;">✗ Upload error: ${err.message}</span>`;
+      }
+    }
+    
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/api/rag/uploads/');
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        
+        const rows = items.map(x => `
+          <tr>
+            <td>${x.id}</td>
+            <td>${x.filename}</td>
+            <td>${x.size_bytes.toLocaleString()}</td>
+            <td>${x.mime_type}</td>
+            <td class="status-${x.status}">${x.status.toUpperCase()}</td>
+            <td>${new Date(x.uploaded_at).toLocaleString()}</td>
+            <td>${x.processed_at ? new Date(x.processed_at).toLocaleString() : '-'}</td>
+            <td>${x.error_message ? `<span class="error-msg">${x.error_message}</span>` : '-'}</td>
+          </tr>
+        `).join('');
+        
+        document.getElementById('statusRows').innerHTML = rows || '<tr><td colspan="8">No uploads yet</td></tr>';
+      } catch (err) {
+        document.getElementById('statusRows').innerHTML = `<tr><td colspan="8" style="color: red;">Error loading status: ${err.message}</td></tr>`;
+      }
+    }
+    
+    // Auto-refresh every 5 seconds if there are processing uploads
+    setInterval(async () => {
+      const tbody = document.getElementById('statusRows');
+      if (tbody.innerHTML.includes('status-processing') || tbody.innerHTML.includes('status-queued')) {
+        await refreshStatus();
+      }
+    }, 5000);
+    
+    // Initial load
+    refreshStatus();
+  </script>
+</body>
+</html>

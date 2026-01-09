@@ -40,7 +40,7 @@ A Django 5-based orchestration system for managing Docker container tasks with D
 ### Prerequisites
 
 - Docker and Docker Compose
-- Ports 9595 available on 192.168.1.3 (configurable)
+- Port 9595 available on your host IP (e.g., <UNRAID_HOST>; configurable)
 
 ### Installation
 
@@ -68,24 +68,26 @@ docker-compose up -d
 
 5. Run migrations:
 ```bash
-docker-compose exec web python manage.py migrate
+docker-compose exec web /opt/venv/bin/python manage.py migrate
 ```
 
 6. Create a superuser for admin access:
 ```bash
-docker-compose exec web python manage.py createsuperuser
+docker-compose exec web /opt/venv/bin/python manage.py createsuperuser
 ```
 
 7. Access the application:
-- WebUI: http://192.168.1.3:9595/
-- API: http://192.168.1.3:9595/api/
-- Admin: http://192.168.1.3:9595/admin/
+- WebUI: http://<HOST_IP>:9595/
+- API: http://<HOST_IP>:9595/api/
+- Admin: http://<HOST_IP>:9595/admin/
 
 ### Local Development (without Docker)
 
 1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+./.venv/bin/python -m pip install -r requirements.txt
 ```
 
 2. Set up PostgreSQL (or use SQLite for development):
@@ -96,17 +98,17 @@ pip install -r requirements.txt
 
 3. Run migrations:
 ```bash
-python manage.py migrate
+./.venv/bin/python manage.py migrate
 ```
 
 4. Create superuser:
 ```bash
-python manage.py createsuperuser
+./.venv/bin/python manage.py createsuperuser
 ```
 
 5. Run development server:
 ```bash
-python manage.py runserver 0.0.0.0:8000
+./.venv/bin/python manage.py runserver 0.0.0.0:8000
 ```
 
 ## Usage
@@ -115,14 +117,14 @@ python manage.py runserver 0.0.0.0:8000
 
 **Launch all tasks:**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<HOST_IP>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
 **Launch specific tasks:**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<HOST_IP>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["log_triage", "gpu_report"]}'
 ```
@@ -130,23 +132,23 @@ curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
 ### Listing Runs
 
 ```bash
-curl http://192.168.1.3:9595/api/runs/
+curl http://<HOST_IP>:9595/api/runs/
 ```
 
 ### Fetching Reports
 
 ```bash
-curl http://192.168.1.3:9595/api/runs/1/report/
+curl http://<HOST_IP>:9595/api/runs/1/report/
 ```
 
 ### Managing Container Allowlist
 
 ```bash
 # List containers
-curl http://192.168.1.3:9595/api/containers/
+curl http://<HOST_IP>:9595/api/containers/
 
 # Add container
-curl -X POST http://192.168.1.3:9595/api/containers/ \
+curl -X POST http://<HOST_IP>:9595/api/containers/ \
   -H "Content-Type: application/json" \
   -d '{"container_id": "abc123", "name": "my-container", "description": "Production container"}'
 ```
@@ -168,7 +170,7 @@ Key environment variables (see `.env.example` for all):
 The `docker-compose.yml` file configures:
 
 - **PostgreSQL** service on internal network
-- **Django** web service exposed on `192.168.1.3:9595`
+- **Django** web service exposed on `HOST_IP:9595`
 - Volume mounts:
   - `CYBER_BRAIN_LOGS` → `/logs`
   - `UPLOADS_DIR` → `/uploads`
@@ -188,29 +190,29 @@ The `docker-compose.yml` file configures:
 ### Running Tests
 
 ```bash
-python manage.py test
+./.venv/bin/python manage.py test --settings=cyberbrain_orchestrator.test_settings
 ```
 
 ### Creating Migrations
 
 ```bash
-python manage.py makemigrations
-python manage.py migrate
+./.venv/bin/python manage.py makemigrations
+./.venv/bin/python manage.py migrate
 ```
 
 ### Accessing Django Shell
 
 ```bash
-python manage.py shell
+./.venv/bin/python manage.py shell
 ```
 
 ## Troubleshooting
 
 ### Port Binding Issues
 
-If port 9595 on 192.168.1.3 is not available:
+If port 9595 on your host is not available:
 1. Edit `docker-compose.yml`
-2. Change `"192.168.1.3:9595:8000"` to your desired IP:port
+2. Change `<HOST_IP>:9595:8000` to your desired IP:port
 
 ### Database Connection Issues
 

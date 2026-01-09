@@ -3,6 +3,7 @@ FROM python:3.12-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/opt/venv/bin:${PATH}"
 
 # Set work directory
 WORKDIR /app
@@ -16,9 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies into dedicated venv
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy project
 COPY . /app/
@@ -26,11 +29,11 @@ COPY . /app/
 # Create directories for logs and uploads
 RUN mkdir -p /logs /uploads
 
-# Collect static files
-RUN python manage.py collectstatic --noinput || true
+# Collect static files using venv interpreter
+RUN /opt/venv/bin/python manage.py collectstatic --noinput || true
 
 # Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["gunicorn", "cyberbrain_orchestrator.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+# Run the application from venv PATH using ASGI (Daphne)
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "cyberbrain_orchestrator.asgi:application"]

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cyberbrain-orchestrator": {
+      "transport": "sse",
+      "url": "http://<UNRAID_HOST>:9595/mcp",
+      "description": "Cyberbrain Orchestrator MCP endpoint exposed via SSE. Replace <UNRAID_HOST> with Unraid LAN IP (e.g., 192.168.1.3) or hostname."
+    }
+  }
+}

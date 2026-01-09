@@ -4,7 +4,7 @@ Django settings for cyberbrain_orchestrator project.
 CYBER-BRAIN BUILD PLAN COMPLIANCE:
 - Django 5 + DRF + ASGI server
 - PostgreSQL in docker-compose
-- Bind to 192.168.1.3:9595
+- Bind to HOST IP:9595 (no fixed LAN IP)
 - ASGI server for async/SSE support
 - MCP endpoint at /mcp
 - Environment variables: CYBER_BRAIN_LOGS, CYBER_BRAIN_UPLOADS, DEBUG_REDACTED_MODE
@@ -35,7 +35,19 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
 # GUARDRAIL: Prevents accidental logging of LLM content
 DEBUG_REDACTED_MODE = os.getenv('DEBUG_REDACTED_MODE', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*']
+def _csv_env(var_name, default=None):
+    raw = os.getenv(var_name)
+    if raw:
+        return [item.strip() for item in raw.split(',') if item.strip()]
+    return default or []
+
+
+ALLOWED_HOSTS = _csv_env('DJANGO_ALLOWED_HOSTS', ['*', 'localhost', '127.0.0.1', '0.0.0.0'])
+
+CSRF_TRUSTED_ORIGINS = _csv_env(
+    'DJANGO_CSRF_TRUSTED_ORIGINS',
+    [f"http://{host}:9595" for host in ALLOWED_HOSTS if host not in {'*', '0.0.0.0'}]
+)
 
 
 # Application definition

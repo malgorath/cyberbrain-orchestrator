@@ -5,7 +5,7 @@ This guide will help you get the Cyberbrain Orchestrator up and running quickly.
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Port 9595 available on 192.168.1.3 (or modify docker-compose.yml)
+- Port 9595 available on your host IP (e.g., <UNRAID_HOST>; override in docker-compose.yml)
 - Access to host Docker socket at `/var/run/docker.sock`
 
 ## Option 1: Docker Compose (Recommended)
@@ -41,17 +41,17 @@ docker-compose logs -f
 
 ```bash
 # Run migrations
-docker-compose exec web python manage.py migrate
+docker-compose exec web /opt/venv/bin/python manage.py migrate
 
 # Create a superuser for admin access
-docker-compose exec web python manage.py createsuperuser
+docker-compose exec web /opt/venv/bin/python manage.py createsuperuser
 ```
 
 ### 4. Access the Application
 
-- **WebUI**: http://192.168.1.3:9595/
-- **API Root**: http://192.168.1.3:9595/api/
-- **Admin Panel**: http://192.168.1.3:9595/admin/
+- **WebUI**: http://<HOST_IP>:9595/
+- **API Root**: http://<HOST_IP>:9595/api/
+- **Admin Panel**: http://<HOST_IP>:9595/admin/
 
 ## Option 2: Local Development
 
@@ -59,11 +59,11 @@ docker-compose exec web python manage.py createsuperuser
 
 ```bash
 # Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install requirements
-pip install -r requirements.txt
+./.venv/bin/python -m pip install -r requirements.txt
 ```
 
 ### 2. Configure Database
@@ -85,14 +85,14 @@ Edit `cyberbrain_orchestrator/settings.py` and temporarily change the database t
 ### 3. Run Migrations
 
 ```bash
-python manage.py migrate
-python manage.py createsuperuser
+./.venv/bin/python manage.py migrate
+./.venv/bin/python manage.py createsuperuser
 ```
 
 ### 4. Run Development Server
 
 ```bash
-python manage.py runserver 0.0.0.0:8000
+./.venv/bin/python manage.py runserver 0.0.0.0:8000
 ```
 
 Access at: http://localhost:8000/
@@ -103,14 +103,14 @@ Access at: http://localhost:8000/
 
 **Launch all tasks:**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<HOST_IP>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
 **Launch specific tasks:**
 ```bash
-curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
+curl -X POST http://<HOST_IP>:9595/api/runs/launch/ \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["log_triage"]}'
 ```
@@ -118,20 +118,20 @@ curl -X POST http://192.168.1.3:9595/api/runs/launch/ \
 ### List Runs
 
 ```bash
-curl http://192.168.1.3:9595/api/runs/
+curl http://<HOST_IP>:9595/api/runs/
 ```
 
 ### Get Run Report
 
 ```bash
-curl http://192.168.1.3:9595/api/runs/1/report/
+curl http://<HOST_IP>:9595/api/runs/1/report/
 ```
 
 ### Manage Container Allowlist
 
 ```bash
 # Add container to allowlist
-curl -X POST http://192.168.1.3:9595/api/containers/ \
+curl -X POST http://<HOST_IP>:9595/api/containers/ \
   -H "Content-Type: application/json" \
   -d '{
     "container_id": "abc123def456",
@@ -140,17 +140,17 @@ curl -X POST http://192.168.1.3:9595/api/containers/ \
   }'
 
 # List allowed containers
-curl http://192.168.1.3:9595/api/containers/
+curl http://<HOST_IP>:9595/api/containers/
 ```
 
 ## Running Tests
 
 ```bash
 # Run all tests
-python manage.py test --settings=cyberbrain_orchestrator.test_settings
+./.venv/bin/python manage.py test --settings=cyberbrain_orchestrator.test_settings
 
 # Run validation script
-python validate.py
+./.venv/bin/python validate.py
 ```
 
 ## Troubleshooting
@@ -160,7 +160,7 @@ python validate.py
 Edit `docker-compose.yml` and change:
 ```yaml
 ports:
-  - "192.168.1.3:9595:8000"  # Change 9595 to another port
+  - "<HOST_IP>:9595:8000"  # Change 9595 to another port
 ```
 
 ### Database Connection Issues

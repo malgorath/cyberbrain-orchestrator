@@ -9,3 +9,10 @@ uvicorn[standard]==0.34.0
 django-mcp-server==0.1.0
 channels==4.2.0
 daphne==4.1.2
+croniter==1.4.1
+
+# Phase 3: RAG dependencies
+sentence-transformers==2.2.2  # Local embedding model
+pypdf==3.17.0  # PDF text extraction
+python-docx==1.1.0  # DOCX text extraction
+

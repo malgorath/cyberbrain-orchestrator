@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Schedules</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
+    h1 { margin-bottom: 10px; }
+    .actions { margin-bottom: 20px; }
+    button { margin-right: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #f5f5f5; }
+  </style>
+</head>
+<body>
+  <h1>Schedules</h1>
+  <div class="actions">
+    <button onclick="refresh()">Refresh</button>
+    <button onclick="createExample()">Create Example (triage/5m)</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Name</th><th>Job</th><th>Type</th><th>Next Run</th><th>Enabled</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td colspan="7">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <script>
+    async function refresh() {
+      const res = await fetch('/api/schedules/');
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.results || []);
+      const rows = items.map(x => `
+        <tr>
+          <td>${x.id}</td>
+          <td>${x.name}</td>
+          <td>${x.job_key || ''}</td>
+          <td>${x.schedule_type}</td>
+          <td>${x.next_run_at || ''}</td>
+          <td>${x.enabled}</td>
+          <td>
+            <button onclick="runNow(${x.id})">Run Now</button>
+            <button onclick="toggle(${x.id}, ${x.enabled})">${x.enabled ? 'Disable' : 'Enable'}</button>
+          </td>
+        </tr>`).join('');
+      document.getElementById('rows').innerHTML = rows || '<tr><td colspan="7">No schedules</td></tr>';
+    }
+
+    async function runNow(id) {
+      const res = await fetch(`/api/schedules/${id}/run-now/`, { method: 'POST' });
+      if (res.ok) {
+        alert('Triggered run-now');
+        refresh();
+      } else {
+        alert('Run-now failed');
+      }
+    }
+
+    async function toggle(id, enabled) {
+      const path = enabled ? 'disable' : 'enable';
+      const res = await fetch(`/api/schedules/${id}/${path}/`, { method: 'POST' });
+      if (res.ok) refresh();
+    }
+
+    async function createExample() {
+      const payload = {
+        name: 'triage-every-5', job_key: 'log_triage', enabled: true,
+        schedule_type: 'interval', interval_minutes: 5, timezone: 'UTC'
+      };
+      const res = await fetch('/api/schedules/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (res.ok) refresh(); else alert('Failed to create example');
+    }
+
+    refresh();
+  </script>
+</body>
+</html>
