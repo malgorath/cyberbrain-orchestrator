@@ -1291,7 +1291,7 @@ class WorkerHost(models.Model):
     
     def is_available(self):
         """Check if host is available for task execution."""
-        return self.enabled and self.healthy
+        return self.enabled and self.healthy and not self.is_stale()
     
     def has_capacity(self):
         """Check if host has available capacity."""

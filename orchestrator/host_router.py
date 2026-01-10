@@ -51,18 +51,33 @@ class HostRouter:
                 logger.error(f"Target host ID {target_host_id} not found")
         
         # Auto-selection: filter available hosts
-        available_hosts = WorkerHost.objects.filter(
-            enabled=True,
-            healthy=True
-        ).order_by('active_runs_count')
+        all_hosts = WorkerHost.objects.all()
+        available_hosts = []
         
-        # Filter by GPU requirement
-        if requires_gpu:
-            available_hosts = [h for h in available_hosts if h.has_gpu()]
-        else:
-            available_hosts = list(available_hosts)
+        # Diagnostic: track why hosts are excluded
+        excluded_reasons = []
+        
+        for host in all_hosts:
+            reasons = []
+            if not host.enabled:
+                reasons.append('disabled')
+            if not host.healthy:
+                reasons.append('unhealthy')
+            if host.is_stale():
+                reasons.append('stale')
+            if requires_gpu and not host.has_gpu():
+                reasons.append('no_gpu')
+            
+            if reasons:
+                excluded_reasons.append(f"{host.name}(id={host.id}): {','.join(reasons)}")
+            else:
+                available_hosts.append(host)
         
         if not available_hosts:
+            logger.error(
+                f"Host selection failed. Total hosts: {all_hosts.count()}, "
+                f"Excluded: {'; '.join(excluded_reasons) if excluded_reasons else 'none'}"
+            )
             raise Exception("No available hosts found. All hosts are disabled or unhealthy.")
         
         # Select host with most available capacity
