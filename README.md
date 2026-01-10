@@ -61,6 +61,38 @@ cp .env.example .env
 mkdir -p logs uploads
 ```
 
+### Using Published Docker Image (Recommended for Production)
+
+The Docker image is automatically built and published to GitHub Container Registry (GHCR) on every push to `main` and on release tags:
+
+**Image:** `ghcr.io/malgorath/cyberbrain-orchestrator:latest`
+
+**Available tags:**
+- `latest` - Latest from main branch
+- `v*` - Release versions (e.g., `v1.0.0`)
+- `main-<sha>` - Specific commit SHA on main
+- `pr-*` - Pull request builds
+
+**For Unraid/Docker templates, use:**
+```
+ghcr.io/malgorath/cyberbrain-orchestrator:latest
+```
+
+**Example docker-compose.yml with published image:**
+```yaml
+version: '3.8'
+services:
+  web:
+    image: ghcr.io/malgorath/cyberbrain-orchestrator:latest
+    ports:
+      - "9595:8000"
+    environment:
+      - DATABASE_URL=postgresql://...
+    volumes:
+      - /mnt/user/cyberbrain/logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
 4. Start the services:
 ```bash
 docker-compose up -d
