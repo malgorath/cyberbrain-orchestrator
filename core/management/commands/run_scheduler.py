@@ -50,6 +50,16 @@ class Command(BaseCommand):
 
     def _tick(self, orchestrator: OrchestratorService, max_claim: int, claim_ttl: int, claimant: str):
         now = timezone.now()
+        logger.info(f"Scheduler tick at {now.isoformat()} (claimant={claimant})")
+        
+        # Heartbeat: refresh all enabled WorkerHosts to prevent staleness
+        from core.models import WorkerHost
+        enabled_hosts = WorkerHost.objects.filter(enabled=True)
+        for host in enabled_hosts:
+            host.last_seen_at = now
+            host.save(update_fields=['last_seen_at'])
+        logger.info(f"Heartbeat: refreshed {enabled_hosts.count()} enabled host(s)")
+        
         # Claim due schedules with row locks to prevent double-run
         with transaction.atomic():
             due_qs = Schedule.due().select_for_update(skip_locked=True)[:max_claim]
@@ -58,7 +68,7 @@ class Command(BaseCommand):
             if schedules:
                 logger.info(f"Claimed {len(schedules)} due schedule(s): {[s.name for s in schedules]}")
             else:
-                logger.debug("No due schedules found")
+                logger.info("No due schedules found")
 
             for sch in schedules:
                 # Acquire claim with TTL to ensure crash-safety and multi-instance correctness
@@ -110,7 +120,9 @@ class Command(BaseCommand):
 
                 # Execute run (best-effort; failures recorded)
                 try:
+                    logger.info(f"Executing run {legacy_run.id} for schedule {sch.id} ({sch.name})")
                     ok = orchestrator.execute_run(legacy_run)
+                    logger.info(f"Run {legacy_run.id} execution {'succeeded' if ok else 'failed'}")
                     if existing_scheduled_run:
                         existing_scheduled_run.status = 'finished' if ok else 'failed'
                         existing_scheduled_run.finished_at = timezone.now()
@@ -118,7 +130,7 @@ class Command(BaseCommand):
                             existing_scheduled_run.error_summary = legacy_run.error_message or 'Run failed'
                         existing_scheduled_run.save()
                 except Exception as e:
-                    logger.error(f"Run execution error for schedule {sch.id}: {e}")
+                    logger.error(f"Run execution error for schedule {sch.id}: {e}", exc_info=True)
                     if existing_scheduled_run:
                         existing_scheduled_run.status = 'failed'
                         existing_scheduled_run.finished_at = timezone.now()

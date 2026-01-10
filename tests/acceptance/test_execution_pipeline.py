@@ -49,6 +49,7 @@ class ExecutionPipelineTests(TestCase):
         - Creates 2 Schedule entries with unique names
         - All schedules have next_run_at <= now (due immediately)
         - ScheduledRun entries link Schedule → Run with status='pending'
+        - GET /api/schedules/ returns count=2
         """
         response = self.client.post('/api/runs/launch/', {
             'directive_id': self.directive.id,
@@ -75,6 +76,11 @@ class ExecutionPipelineTests(TestCase):
         for sr in scheduled_runs:
             self.assertEqual(sr.status, 'pending')
             self.assertEqual(sr.run.id, run_id)
+        
+        # Assert: API returns schedules
+        api_response = self.client.get('/api/schedules/')
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_response.data['count'], 2)
 
     def test_scheduler_executes_launched_run(self):
         """
@@ -115,6 +121,9 @@ class ExecutionPipelineTests(TestCase):
             status='pending'
         )
         
+        # Record initial last_seen_at
+        initial_last_seen = self.host.last_seen_at
+        
         # Mock OrchestratorService.execute_run
         with patch.object(OrchestratorService, 'execute_run', return_value=True) as mock_execute:
             # Execute scheduler tick
@@ -132,6 +141,10 @@ class ExecutionPipelineTests(TestCase):
         self.assertEqual(scheduled_run.status, 'finished')
         self.assertIsNotNone(scheduled_run.started_at)
         self.assertIsNotNone(scheduled_run.finished_at)
+        
+        # Assert: WorkerHost heartbeat refreshed
+        self.host.refresh_from_db()
+        self.assertNotEqual(self.host.last_seen_at, initial_last_seen)
 
     def test_job_state_transitions_during_execution(self):
         """
