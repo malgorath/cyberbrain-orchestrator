@@ -844,6 +844,7 @@ class WorkerHostViewSet(viewsets.ModelViewSet):
         """GET /api/worker-hosts/{id}/health/ - Get host health status."""
         from core.models import WorkerHost
         from orchestrator.health_checker import HealthChecker
+        from django.utils import timezone
         
         try:
             host = WorkerHost.objects.get(id=pk)
@@ -856,8 +857,12 @@ class WorkerHostViewSet(viewsets.ModelViewSet):
         # Optionally trigger health check
         if request.query_params.get('check', 'false').lower() == 'true':
             checker = HealthChecker()
-            checker.check_host(host)
+            success = checker.check_host(host)
             host.refresh_from_db()
+        else:
+            # Always update last_seen_at on health endpoint access (heartbeat)
+            host.last_seen_at = timezone.now()
+            host.save(update_fields=['last_seen_at'])
         
         return Response({
             'host_id': host.id,
