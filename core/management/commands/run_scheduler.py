@@ -83,9 +83,48 @@ class Command(BaseCommand):
                 ).select_related('run').first()
 
                 if existing_scheduled_run:
-                    # Launched run: execute existing run
-                    logger.info(f"Schedule {sch.id} ({sch.name}) has existing run {existing_scheduled_run.run.id}, executing...")
+                    # Launched run: execute only the specific job for this schedule
+                    # Parse task_type from schedule name: "launch-run-{run_id}-{task_type}"
                     legacy_run = existing_scheduled_run.run
+                    task_type = self._extract_task_type_from_schedule(sch)
+                    
+                    if not task_type:
+                        logger.error(f"Cannot parse task_type from schedule {sch.id} ({sch.name})")
+                        existing_scheduled_run.status = 'failed'
+                        existing_scheduled_run.finished_at = now
+                        existing_scheduled_run.error_summary = 'Invalid schedule name format'
+                        existing_scheduled_run.save()
+                        sch.enabled = False
+                        sch.save(update_fields=['enabled'])
+                        continue
+                    
+                    # Find the specific job for this task_type
+                    target_job = LegacyJob.objects.filter(
+                        run=legacy_run,
+                        task_type=task_type
+                    ).first()
+                    
+                    if not target_job:
+                        logger.error(f"Job {task_type} not found for run {legacy_run.id}")
+                        existing_scheduled_run.status = 'failed'
+                        existing_scheduled_run.finished_at = now
+                        existing_scheduled_run.error_summary = f'Job {task_type} not found'
+                        existing_scheduled_run.save()
+                        sch.enabled = False
+                        sch.save(update_fields=['enabled'])
+                        continue
+                    
+                    # Check if job already completed/failed (prevent duplicate execution)
+                    if target_job.status in ['completed', 'failed']:
+                        logger.info(f"Job {target_job.id} ({task_type}) already {target_job.status}, skipping")
+                        existing_scheduled_run.status = 'finished'
+                        existing_scheduled_run.finished_at = now
+                        existing_scheduled_run.save()
+                        sch.enabled = False
+                        sch.save(update_fields=['enabled'])
+                        continue
+                    
+                    logger.info(f"Executing job {target_job.id} ({task_type}) for run {legacy_run.id}")
                     existing_scheduled_run.status = 'started'
                     existing_scheduled_run.started_at = now
                     existing_scheduled_run.save(update_fields=['status', 'started_at'])
@@ -113,22 +152,39 @@ class Command(BaseCommand):
                         started_at=now
                     )
 
-                # Update schedule timestamps and compute next
+                # Disable schedule after execution (one-shot queue item)
+                sch.enabled = False
                 sch.last_run_at = now
-                sch.compute_next_run(from_time=now)
-                sch.save(update_fields=['last_run_at', 'next_run_at'])
+                sch.save(update_fields=['enabled', 'last_run_at'])
 
-                # Execute run (best-effort; failures recorded)
+                # Execute job or run
                 try:
-                    logger.info(f"Executing run {legacy_run.id} for schedule {sch.id} ({sch.name})")
-                    ok = orchestrator.execute_run(legacy_run)
-                    logger.info(f"Run {legacy_run.id} execution {'succeeded' if ok else 'failed'}")
-                    if existing_scheduled_run:
-                        existing_scheduled_run.status = 'finished' if ok else 'failed'
-                        existing_scheduled_run.finished_at = timezone.now()
-                        if not ok:
-                            existing_scheduled_run.error_summary = legacy_run.error_message or 'Run failed'
-                        existing_scheduled_run.save()
+                    if existing_scheduled_run and task_type:
+                        # Execute single job
+                        logger.info(f"Executing job {target_job.id} ({task_type}) for schedule {sch.id}")
+                        ok = orchestrator.execute_job(target_job)
+                        logger.info(f"Job {target_job.id} execution {'succeeded' if ok else 'failed'}")
+                        
+                        # Update run status based on all jobs
+                        self._update_run_status(legacy_run)
+                        
+                        if existing_scheduled_run:
+                            existing_scheduled_run.status = 'finished' if ok else 'failed'
+                            existing_scheduled_run.finished_at = timezone.now()
+                            if not ok:
+                                existing_scheduled_run.error_summary = target_job.error_message or 'Job failed'
+                            existing_scheduled_run.save()
+                    else:
+                        # Execute entire run (recurring schedules)
+                        logger.info(f"Executing run {legacy_run.id} for schedule {sch.id} ({sch.name})")
+                        ok = orchestrator.execute_run(legacy_run)
+                        logger.info(f"Run {legacy_run.id} execution {'succeeded' if ok else 'failed'}")
+                        if existing_scheduled_run:
+                            existing_scheduled_run.status = 'finished' if ok else 'failed'
+                            existing_scheduled_run.finished_at = timezone.now()
+                            if not ok:
+                                existing_scheduled_run.error_summary = legacy_run.error_message or 'Run failed'
+                            existing_scheduled_run.save()
                 except Exception as e:
                     logger.error(f"Run execution error for schedule {sch.id}: {e}", exc_info=True)
                     if existing_scheduled_run:
@@ -161,3 +217,47 @@ class Command(BaseCommand):
         if sch.max_per_job is not None and job_running >= sch.max_per_job:
             return False
         return True
+    
+    def _extract_task_type_from_schedule(self, sch: Schedule) -> str:
+        """Extract task_type from schedule name (format: launch-run-{id}-{task_type})."""
+        if not sch.name.startswith('launch-run-'):
+            return None
+        parts = sch.name.split('-', 3)  # ['launch', 'run', '{id}', '{task_type}']
+        if len(parts) >= 4:
+            return parts[3]
+        return None
+    
+    def _update_run_status(self, run: LegacyRun):
+        """Update run status based on all jobs' statuses."""
+        jobs = run.jobs.all()
+        if not jobs:
+            return
+        
+        statuses = [j.status for j in jobs]
+        
+        # If any job is running, run is running
+        if 'running' in statuses:
+            if run.status != 'running':
+                run.status = 'running'
+                run.save(update_fields=['status'])
+            return
+        
+        # If any job is pending, run stays pending or running
+        if 'pending' in statuses:
+            if run.status not in ['pending', 'running']:
+                run.status = 'pending'
+                run.save(update_fields=['status'])
+            return
+        
+        # All jobs are completed or failed
+        if 'failed' in statuses:
+            if run.status != 'failed':
+                run.status = 'failed'
+                run.completed_at = timezone.now()
+                run.save(update_fields=['status', 'completed_at'])
+        else:
+            # All completed
+            if run.status != 'completed':
+                run.status = 'completed'
+                run.completed_at = timezone.now()
+                run.save(update_fields=['status', 'completed_at'])

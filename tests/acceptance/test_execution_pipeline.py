@@ -253,16 +253,17 @@ class ExecutionPipelineTests(TestCase):
         ATDD: Full pipeline from launch to completion.
         
         Contract:
-        1. POST /api/runs/launch/
-        2. Creates Run, Jobs, Schedules, ScheduledRuns
-        3. Scheduler claims schedules
-        4. Executes jobs (mocked)
-        5. Run and Jobs transition to 'completed'
+        1. POST /api/runs/launch/ with 3 tasks
+        2. Creates Run, 3 Jobs, 3 Schedules, 3 ScheduledRuns
+        3. Scheduler claims 3 schedules in one tick
+        4. Executes 3 jobs EXACTLY ONCE (not 3 full runs)
+        5. All Jobs and Run transition to 'completed'
+        6. All Schedules marked disabled after execution
         """
-        # Step 1: Launch run
+        # Step 1: Launch run with 3 tasks
         response = self.client.post('/api/runs/launch/', {
             'directive_id': self.directive.id,
-            'tasks': ['log_triage']
+            'tasks': ['log_triage', 'gpu_report', 'service_map']
         }, format='json')
         
         self.assertEqual(response.status_code, 201)
@@ -271,24 +272,44 @@ class ExecutionPipelineTests(TestCase):
         # Step 2: Verify setup
         run = LegacyRun.objects.get(id=run_id)
         self.assertEqual(run.status, 'pending')
-        self.assertEqual(run.jobs.count(), 1)
+        self.assertEqual(run.jobs.count(), 3)
         
         schedules = Schedule.objects.filter(name__startswith=f'launch-run-{run_id}')
-        self.assertEqual(schedules.count(), 1)
+        self.assertEqual(schedules.count(), 3)
+        self.assertTrue(all(s.enabled for s in schedules))
         
-        # Step 3: Scheduler executes (with mocked task)
-        with patch.object(OrchestratorService, 'execute_log_triage', return_value=True):
+        # Step 3: Mock execute_job to track calls
+        job_execution_count = {}
+        original_execute_job = OrchestratorService.execute_job
+        
+        def mock_execute_job(self, job):
+            job_id = job.id
+            job_execution_count[job_id] = job_execution_count.get(job_id, 0) + 1
+            # Call original to update status
+            return original_execute_job(self, job)
+        
+        with patch.object(OrchestratorService, 'execute_job', mock_execute_job), \
+             patch.object(OrchestratorService, 'execute_log_triage', return_value=True), \
+             patch.object(OrchestratorService, 'execute_gpu_report', return_value=True), \
+             patch.object(OrchestratorService, 'execute_service_map', return_value=True):
             cmd = SchedulerCommand()
             orchestrator = OrchestratorService()
             cmd._tick(orchestrator, max_claim=10, claim_ttl=120, claimant='test-scheduler')
         
-        # Step 4: Verify completion
+        # Step 4: Verify each job executed EXACTLY ONCE
         run.refresh_from_db()
         self.assertEqual(run.status, 'completed')
         
-        job = run.jobs.first()
-        self.assertEqual(job.status, 'completed')
+        for job in run.jobs.all():
+            self.assertEqual(job.status, 'completed')
+            exec_count = job_execution_count.get(job.id, 0)
+            self.assertEqual(exec_count, 1, 
+                           f"Job {job.id} ({job.task_type}) executed {exec_count} times, expected 1")
         
-        # Step 5: Verify ScheduledRun status
-        scheduled_run = ScheduledRun.objects.filter(run=run).first()
-        self.assertEqual(scheduled_run.status, 'finished')
+        # Step 5: Verify schedules disabled
+        schedules = Schedule.objects.filter(name__startswith=f'launch-run-{run_id}')
+        self.assertTrue(all(not s.enabled for s in schedules), "All schedules should be disabled after execution")
+        
+        # Step 6: Verify ScheduledRun status
+        for scheduled_run in ScheduledRun.objects.filter(run=run):
+            self.assertEqual(scheduled_run.status, 'finished')
