@@ -49,7 +49,7 @@ scheduler:
   build: .
   command: >
     sh -c "/opt/venv/bin/python manage.py migrate &&
-           /opt/venv/bin/python manage.py run_scheduler --interval=30"
+           /opt/venv/bin/python manage.py run_scheduler --interval=30 --claim-ttl=120"
   volumes:
     - .:/app
     - ${CYBER_BRAIN_LOGS:-./logs}:/logs
@@ -66,6 +66,11 @@ scheduler:
 ```
 
 ## Usage
+- Run the scheduler manually (CLI):
+```
+python manage.py run_scheduler --interval=30 --claim-ttl=120
+```
+
 - Create a schedule:
 ```
 curl -X POST http://localhost:9595/api/schedules/ \

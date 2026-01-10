@@ -29,10 +29,11 @@ class Command(BaseCommand):
         parser.add_argument('--claimant', type=str, default='', help='Identifier for this scheduler instance (defaults to hostname:pid)')
 
     def handle(self, *args, **options):
-        poll_interval = options['interval']
-        max_claim = options['max_claim']
-        claim_ttl = options['claim-ttl']
-        claimant = options['claimant'] or f"{socket.gethostname()}:{os.getpid()}"
+        poll_interval = options.get('interval', 30)
+        max_claim = options.get('max_claim', 10)
+        # Django argparse maps '--claim-ttl' -> 'claim_ttl'
+        claim_ttl = options.get('claim_ttl', 120)
+        claimant = options.get('claimant') or f"{socket.gethostname()}:{os.getpid()}"
         self.stdout.write(self.style.SUCCESS(f'Scheduler starting (interval={poll_interval}s)...'))
 
         orchestrator = OrchestratorService()
@@ -40,6 +41,9 @@ class Command(BaseCommand):
         while True:
             try:
                 self._tick(orchestrator, max_claim, claim_ttl, claimant)
+            except KeyboardInterrupt:
+                self.stdout.write(self.style.WARNING('Scheduler stopped by user'))
+                break
             except Exception as e:
                 logger.error(f"Scheduler tick error: {e}")
             time.sleep(poll_interval)
