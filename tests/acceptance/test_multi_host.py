@@ -393,6 +393,11 @@ class WorkerHostAPITests(TestCase):
         data = response.json()
         self.assertIn('healthy', data)
         self.assertIn('last_seen_at', data)
+        
+        # Verify heartbeat: last_seen_at should be set and host not stale
+        self.host.refresh_from_db()
+        self.assertIsNotNone(self.host.last_seen_at)
+        self.assertFalse(self.host.is_stale())
     
     def test_delete_worker_host(self):
         """DELETE /api/worker-hosts/{id}/ removes host."""

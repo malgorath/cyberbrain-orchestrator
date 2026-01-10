@@ -329,4 +329,59 @@ Access WebUI:
 - RunNotification model has NO fields for LLM content
 - Approval workflow preserves token-only logging
 
+---
+
+## Phase 7 — Multi-Host Worker Expansion
+
+- **Status**: Completed
+- WorkerHost model with docker_socket and docker_tcp support
+- Intelligent host selection with load balancing and GPU-aware routing
+- Health monitoring with Docker daemon ping checks
+- SSH tunnel framework for secure remote Docker access
+- API endpoints for WorkerHost CRUD and health status
+- 25/27 acceptance tests passing (2 skipped for paramiko)
+
+### Acceptance Criteria
+
+**WorkerHost Management:**
+- WorkerHost model stores host metadata (name, type, base_url, capabilities)
+- Hosts can be docker_socket (local) or docker_tcp (remote)
+- Capabilities JSON includes: gpus, gpu_count, max_concurrency
+- SSH config stored securely, never exposed in logs/responses
+- LAN-only IP constraint enforced
+
+**Health Monitoring:**
+- Health endpoint at `/api/worker-hosts/{id}/health/` returns status
+- **WorkerHost last_seen_at heartbeat is updated on health endpoint access**
+- Hosts are not stale when health endpoint accessed regularly
+- Docker ping checks verify daemon connectivity
+- Stale hosts (not seen for 5+ minutes) marked unhealthy
+
+**Host Selection:**
+- HostRouter selects hosts based on: enabled, healthy, capacity, GPU requirements
+- Load balancing distributes runs to least-loaded hosts
+- GPU-aware routing sends gpu_report tasks to GPU hosts
+- Explicit host targeting via target_host_id parameter
+- Failover to backup hosts when primary unavailable
+
+**Run Assignment:**
+- Run model tracks assigned worker_host
+- ContainerInventory tracks per-host container snapshots
+- Run launch API accepts target_host_id for explicit host selection
+- Auto-selection uses HostRouter when no target specified
+
+**Security:**
+- SSH credentials protected in JSONField
+- Credentials excluded from __str__() representation
+- API responses never expose SSH config details
+- All Phase 1-6 guardrails maintained (no LLM content storage)
+
+### References
+
+- Status Document: [PHASE7_STATUS.md](../PHASE7_STATUS.md)
+- Tests: [tests/acceptance/test_multi_host.py](../tests/acceptance/test_multi_host.py)
+- Runbook: [docs/WORKERHOST_RUNBOOK.md](WORKERHOST_RUNBOOK.md)
+- HostRouter: [orchestrator/host_router.py](../orchestrator/host_router.py)
+- HealthChecker: [orchestrator/health_checker.py](../orchestrator/health_checker.py)
+
 
