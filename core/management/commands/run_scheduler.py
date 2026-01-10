@@ -54,6 +54,11 @@ class Command(BaseCommand):
         with transaction.atomic():
             due_qs = Schedule.due().select_for_update(skip_locked=True)[:max_claim]
             schedules = list(due_qs)
+            
+            if schedules:
+                logger.info(f"Claimed {len(schedules)} due schedule(s): {[s.name for s in schedules]}")
+            else:
+                logger.debug("No due schedules found")
 
             for sch in schedules:
                 # Acquire claim with TTL to ensure crash-safety and multi-instance correctness
@@ -61,24 +66,42 @@ class Command(BaseCommand):
                 sch.claimed_until = now + timedelta(seconds=claim_ttl)
                 sch.save(update_fields=['claimed_by', 'claimed_until'])
 
-                # Concurrency checks
-                if not self._can_run(sch):
-                    # Push next run out by small backoff to avoid tight loop
-                    sch.next_run_at = now + timedelta(minutes=1)
-                    # Release claim immediately
-                    sch.claimed_by = ''
-                    sch.claimed_until = None
-                    sch.save(update_fields=['next_run_at', 'claimed_by', 'claimed_until'])
-                    continue
+                # Check if this schedule already has a ScheduledRun (from launch API)
+                existing_scheduled_run = ScheduledRun.objects.filter(
+                    schedule=sch,
+                    status__in=['pending']
+                ).select_related('run').first()
 
-                # Resolve directive for legacy run
-                legacy_directive = self._resolve_directive(sch)
-                # Create legacy run and job
-                legacy_run = LegacyRun.objects.create(directive=legacy_directive, status='pending')
-                LegacyJob.objects.create(run=legacy_run, task_type=sch.job.task_key, status='pending')
+                if existing_scheduled_run:
+                    # Launched run: execute existing run
+                    logger.info(f"Schedule {sch.id} ({sch.name}) has existing run {existing_scheduled_run.run.id}, executing...")
+                    legacy_run = existing_scheduled_run.run
+                    existing_scheduled_run.status = 'started'
+                    existing_scheduled_run.started_at = now
+                    existing_scheduled_run.save(update_fields=['status', 'started_at'])
+                else:
+                    # Concurrency checks for recurring schedules
+                    if not self._can_run(sch):
+                        # Push next run out by small backoff to avoid tight loop
+                        sch.next_run_at = now + timedelta(minutes=1)
+                        # Release claim immediately
+                        sch.claimed_by = ''
+                        sch.claimed_until = None
+                        sch.save(update_fields=['next_run_at', 'claimed_by', 'claimed_until'])
+                        continue
 
-                # Link scheduled history
-                ScheduledRun.objects.create(schedule=sch, run=legacy_run, status='started', started_at=now)
+                    # Recurring schedule: create new run
+                    legacy_directive = self._resolve_directive(sch)
+                    legacy_run = LegacyRun.objects.create(directive=legacy_directive, status='pending')
+                    LegacyJob.objects.create(run=legacy_run, task_type=sch.job.task_key, status='pending')
+
+                    # Link scheduled history
+                    existing_scheduled_run = ScheduledRun.objects.create(
+                        schedule=sch,
+                        run=legacy_run,
+                        status='started',
+                        started_at=now
+                    )
 
                 # Update schedule timestamps and compute next
                 sch.last_run_at = now
@@ -88,21 +111,19 @@ class Command(BaseCommand):
                 # Execute run (best-effort; failures recorded)
                 try:
                     ok = orchestrator.execute_run(legacy_run)
-                    entry = ScheduledRun.objects.filter(schedule=sch, run=legacy_run).order_by('-created_at').first()
-                    if entry:
-                        entry.status = 'finished' if ok else 'failed'
-                        entry.finished_at = timezone.now()
+                    if existing_scheduled_run:
+                        existing_scheduled_run.status = 'finished' if ok else 'failed'
+                        existing_scheduled_run.finished_at = timezone.now()
                         if not ok:
-                            entry.error_summary = legacy_run.error_message or 'Run failed'
-                        entry.save()
+                            existing_scheduled_run.error_summary = legacy_run.error_message or 'Run failed'
+                        existing_scheduled_run.save()
                 except Exception as e:
                     logger.error(f"Run execution error for schedule {sch.id}: {e}")
-                    entry = ScheduledRun.objects.filter(schedule=sch, run=legacy_run).order_by('-created_at').first()
-                    if entry:
-                        entry.status = 'failed'
-                        entry.finished_at = timezone.now()
-                        entry.error_summary = str(e)
-                        entry.save()
+                    if existing_scheduled_run:
+                        existing_scheduled_run.status = 'failed'
+                        existing_scheduled_run.finished_at = timezone.now()
+                        existing_scheduled_run.error_summary = str(e)
+                        existing_scheduled_run.save()
 
                 # Release claim now that scheduling work is complete
                 sch.claimed_by = ''

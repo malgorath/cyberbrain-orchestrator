@@ -106,6 +106,42 @@ class RunViewSet(viewsets.ModelViewSet):
             )
             metrics.record_job_created(task_key=task_type)
 
+        # Create schedules for immediate execution (Phase 2 scheduler integration)
+        from core.models import Job as CoreJob, Schedule, ScheduledRun
+        from django.utils import timezone
+        
+        for task_type in tasks:
+            # Get or create core.Job template for this task type
+            core_job, _ = CoreJob.objects.get_or_create(
+                task_key=task_type,
+                defaults={
+                    'name': f'{task_type.replace("_", " ").title()} Task',
+                    'description': f'Auto-created job template for {task_type}',
+                    'is_active': True
+                }
+            )
+            
+            # Create one-time schedule for immediate execution
+            schedule = Schedule.objects.create(
+                name=f'launch-run-{run.id}-{task_type}',
+                job=core_job,
+                directive=None,  # Will use directive from run
+                custom_directive_text=f'Execute {task_type} for run {run.id}',
+                enabled=True,
+                schedule_type='interval',
+                interval_minutes=999999,  # Effectively one-time (won't repeat)
+                next_run_at=timezone.now(),  # Due immediately
+                task3_scope='allowlist'
+            )
+            
+            # Link schedule to existing run
+            ScheduledRun.objects.create(
+                schedule=schedule,
+                run=run,
+                status='pending',
+                started_at=None
+            )
+
         logger.info(f"Launched run {run.id} with tasks: {tasks} on host {selected_host.name}")
 
         return Response(
