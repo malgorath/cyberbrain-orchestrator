@@ -7,8 +7,11 @@
   <style>
     body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
     h1 { margin-bottom: 10px; }
-    .actions { margin-bottom: 20px; }
-    button { margin-right: 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+    label { display: block; margin-top: 8px; font-weight: 600; }
+    input, textarea, select { width: 100%; padding: 6px; }
+    textarea { height: 70px; }
+    button { margin-right: 10px; margin-top: 8px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { border: 1px solid #ddd; padding: 8px; }
     th { background: #f5f5f5; }
@@ -16,24 +19,56 @@
 </head>
 <body>
   <h1>Schedules</h1>
-  <div class="actions">
-    <button onclick="refresh()">Refresh</button>
-    <button onclick="createExample()">Create Example (triage/5m)</button>
+  <div class="grid">
+    <div>
+      <h3 id="form-title">Create Schedule</h3>
+      <input type="hidden" id="schedule-id" />
+      <label>Name</label>
+      <input id="name" placeholder="triage-every-5" />
+      <label>Task</label>
+      <select id="task_id"></select>
+      <label>Type</label>
+      <select id="schedule_type" onchange="toggleScheduleFields()">
+        <option value="one_shot">one_shot</option>
+        <option value="interval" selected>interval</option>
+        <option value="cron">cron</option>
+      </select>
+      <label>Interval Minutes</label>
+      <input id="interval_minutes" type="number" min="1" />
+      <label>Cron Expr</label>
+      <input id="cron_expr" placeholder="0 */2 * * *" />
+      <label>Timezone</label>
+      <input id="timezone" value="UTC" />
+      <label>Enabled</label>
+      <select id="enabled">
+        <option value="true" selected>True</option>
+        <option value="false">False</option>
+      </select>
+      <label>Next Run At (one_shot only, ISO)</label>
+      <input id="next_run_at" placeholder="2025-01-10T12:00:00Z" />
+      <button onclick="saveSchedule()">Save</button>
+      <button onclick="resetForm()">Reset</button>
+    </div>
+    <div>
+      <div class="actions">
+        <button onclick="refresh()">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Name</th><th>Task</th><th>Type</th><th>Next Run</th><th>Enabled</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="7">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th><th>Name</th><th>Job</th><th>Type</th><th>Next Run</th><th>Enabled</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="rows">
-      <tr><td colspan="7">Loading...</td></tr>
-    </tbody>
-  </table>
 
   <script>
     async function refresh() {
+      await loadTasks();
       const res = await fetch('/api/schedules/');
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.results || []);
@@ -41,13 +76,14 @@
         <tr>
           <td>${x.id}</td>
           <td>${x.name}</td>
-          <td>${x.job_key || ''}</td>
+          <td>${x.task_key_read || ''}</td>
           <td>${x.schedule_type}</td>
           <td>${x.next_run_at || ''}</td>
           <td>${x.enabled}</td>
           <td>
             <button onclick="runNow(${x.id})">Run Now</button>
             <button onclick="toggle(${x.id}, ${x.enabled})">${x.enabled ? 'Disable' : 'Enable'}</button>
+            <button onclick='loadSchedule(${JSON.stringify(x)})'>Edit</button>
           </td>
         </tr>`).join('');
       document.getElementById('rows').innerHTML = rows || '<tr><td colspan="7">No schedules</td></tr>';
@@ -69,13 +105,69 @@
       if (res.ok) refresh();
     }
 
-    async function createExample() {
+    async function loadTasks() {
+      const res = await fetch('/api/tasks/');
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.results || []);
+      const select = document.getElementById('task_id');
+      select.innerHTML = items.map(t => `<option value="${t.id}">${t.key}</option>`).join('');
+    }
+
+    function loadSchedule(schedule) {
+      document.getElementById('form-title').innerText = 'Edit Schedule';
+      document.getElementById('schedule-id').value = schedule.id;
+      document.getElementById('name').value = schedule.name;
+      document.getElementById('task_id').value = schedule.task_id_read || '';
+      document.getElementById('schedule_type').value = schedule.schedule_type;
+      document.getElementById('interval_minutes').value = schedule.interval_minutes || '';
+      document.getElementById('cron_expr').value = schedule.cron_expr || '';
+      document.getElementById('timezone').value = schedule.timezone || 'UTC';
+      document.getElementById('enabled').value = String(schedule.enabled);
+      document.getElementById('next_run_at').value = schedule.next_run_at || '';
+      toggleScheduleFields();
+    }
+
+    function resetForm() {
+      document.getElementById('form-title').innerText = 'Create Schedule';
+      document.getElementById('schedule-id').value = '';
+      document.getElementById('name').value = '';
+      document.getElementById('interval_minutes').value = '';
+      document.getElementById('cron_expr').value = '';
+      document.getElementById('timezone').value = 'UTC';
+      document.getElementById('enabled').value = 'true';
+      document.getElementById('next_run_at').value = '';
+      toggleScheduleFields();
+    }
+
+    function toggleScheduleFields() {
+      const type = document.getElementById('schedule_type').value;
+      document.getElementById('interval_minutes').disabled = type !== 'interval';
+      document.getElementById('cron_expr').disabled = type !== 'cron';
+      document.getElementById('next_run_at').disabled = type !== 'one_shot';
+    }
+
+    async function saveSchedule() {
+      const id = document.getElementById('schedule-id').value;
       const payload = {
-        name: 'triage-every-5', job_key: 'log_triage', enabled: true,
-        schedule_type: 'interval', interval_minutes: 5, timezone: 'UTC'
+        name: document.getElementById('name').value.trim(),
+        task_id: Number(document.getElementById('task_id').value),
+        schedule_type: document.getElementById('schedule_type').value,
+        interval_minutes: document.getElementById('interval_minutes').value ? Number(document.getElementById('interval_minutes').value) : null,
+        cron_expr: document.getElementById('cron_expr').value.trim(),
+        timezone: document.getElementById('timezone').value.trim(),
+        enabled: document.getElementById('enabled').value === 'true',
+        next_run_at: document.getElementById('next_run_at').value.trim() || null,
       };
-      const res = await fetch('/api/schedules/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (res.ok) refresh(); else alert('Failed to create example');
+      const url = id ? `/api/schedules/${id}/` : '/api/schedules/';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (res.ok) {
+        resetForm();
+        refresh();
+      } else {
+        const err = await res.json();
+        alert(JSON.stringify(err));
+      }
     }
 
     refresh();

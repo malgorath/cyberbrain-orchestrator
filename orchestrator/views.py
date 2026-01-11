@@ -13,9 +13,10 @@ from core.models import LLMCall as CoreLLMCall
 from .serializers import (
     DirectiveSerializer, RunSerializer, RunListSerializer, 
     JobSerializer, LLMCallSerializer, ContainerAllowlistSerializer,
-    LaunchRunSerializer, RunArtifactSerializer, ScheduleSerializer
+    LaunchRunSerializer, RunArtifactSerializer, ScheduleSerializer,
+    TaskDefinitionSerializer
 )
-from core.models import Schedule as CoreSchedule, ScheduledRun as CoreScheduledRun, Job as CoreJob
+from core.models import Schedule as CoreSchedule, ScheduledRun as CoreScheduledRun, Job as CoreJob, JobQueueItem
 from . import metrics
 import logging
 import os
@@ -28,6 +29,13 @@ class DirectiveViewSet(viewsets.ModelViewSet):
     """ViewSet for managing directives"""
     queryset = Directive.objects.all()
     serializer_class = DirectiveSerializer
+    permission_classes = [AllowAny]
+
+
+class TaskDefinitionViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing TaskDefinitions (core.Job templates)."""
+    queryset = CoreJob.objects.all()
+    serializer_class = TaskDefinitionSerializer
     permission_classes = [AllowAny]
 
 
@@ -47,7 +55,8 @@ class RunViewSet(viewsets.ModelViewSet):
         serializer = LaunchRunSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        tasks = serializer.validated_data.get('tasks', ['log_triage', 'gpu_report', 'service_map'])
+        tasks = serializer.validated_data.get('tasks')
+        task_ids = serializer.validated_data.get('task_ids')
         directive_id = serializer.validated_data.get('directive_id')
         target_host_id = serializer.validated_data.get('target_host_id')  # New: explicit host selection
 
@@ -84,11 +93,44 @@ class RunViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Resolve task definitions
+        if task_ids:
+            task_defs = list(CoreJob.objects.filter(id__in=task_ids, is_active=True))
+        elif tasks:
+            task_defs = list(CoreJob.objects.filter(task_key__in=tasks, is_active=True))
+        else:
+            task_defs = list(CoreJob.objects.filter(is_active=True))
+
+        if task_ids and len(task_defs) != len(set(task_ids)):
+            return Response(
+                {'error': 'One or more task_ids are invalid or disabled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if tasks and len(task_defs) != len(set(tasks)):
+            return Response(
+                {'error': 'One or more tasks are invalid or disabled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not task_defs:
+            return Response(
+                {'error': 'No enabled task definitions found'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        task_keys = [td.task_key for td in task_defs]
+
         # Create the run
         run = Run.objects.create(
             directive=directive,
             status='pending',
-            worker_host=selected_host  # New: assign worker host
+            worker_host=selected_host,  # New: assign worker host
+            directive_snapshot={
+                'id': directive.id,
+                'name': directive.name,
+                'description': directive.description,
+                'task_config': directive.task_config,
+            },
         )
         
         # Increment active runs count
@@ -97,57 +139,29 @@ class RunViewSet(viewsets.ModelViewSet):
         # Record metrics
         metrics.record_run_created(status='pending')
 
-        # Create jobs for each task
-        for task_type in tasks:
-            Job.objects.create(
+        # Create jobs for each task and enqueue
+        for task_def in task_defs:
+            job = Job.objects.create(
                 run=run,
-                task_type=task_type,
+                task_type=task_def.task_key,
                 status='pending'
             )
-            metrics.record_job_created(task_key=task_type)
+            JobQueueItem.objects.create(job=job, run=run)
+            metrics.record_job_created(task_key=task_def.task_key)
 
-        # Create schedules for immediate execution (Phase 2 scheduler integration)
-        from core.models import Job as CoreJob, Schedule, ScheduledRun
-        from django.utils import timezone
-        
-        for task_type in tasks:
-            # Get or create core.Job template for this task type
-            core_job, _ = CoreJob.objects.get_or_create(
-                task_key=task_type,
-                defaults={
-                    'name': f'{task_type.replace("_", " ").title()} Task',
-                    'description': f'Auto-created job template for {task_type}',
-                    'is_active': True
-                }
-            )
-            
-            # Create one-time schedule for immediate execution
-            schedule = Schedule.objects.create(
-                name=f'launch-run-{run.id}-{task_type}',
-                job=core_job,
-                directive=None,  # Will use directive from run
-                custom_directive_text=f'Execute {task_type} for run {run.id}',
-                enabled=True,
-                schedule_type='interval',
-                interval_minutes=999999,  # Effectively one-time (won't repeat)
-                next_run_at=timezone.now(),  # Due immediately
-                task3_scope='allowlist'
-            )
-            
-            # Link schedule to existing run
-            ScheduledRun.objects.create(
-                schedule=schedule,
-                run=run,
-                status='pending',
-                started_at=None
-            )
-
-        logger.info(f"Launched run {run.id} with tasks: {tasks} on host {selected_host.name}")
+        logger.info(f"Launched run {run.id} with tasks: {task_keys} on host {selected_host.name}")
 
         return Response(
             RunSerializer(run).data,
             status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=['get'])
+    def jobs(self, request, pk=None):
+        """List jobs for a specific run."""
+        run = self.get_object()
+        serializer = JobSerializer(run.jobs.all().order_by('id'), many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
     def report(self, request, pk=None):
@@ -211,12 +225,30 @@ class ScheduleViewSet(viewsets.ModelViewSet):
                 name='default', defaults={'description': 'Default orchestrator directive'}
             )
 
+        elif schedule.job.default_directive:
+            legacy_directive, _ = LegacyDirective.objects.get_or_create(
+                name=schedule.job.default_directive.name,
+                defaults={
+                    'description': schedule.job.default_directive.description or 'Imported from core directive',
+                    'task_config': schedule.job.default_directive.task_config or {},
+                }
+            )
         # Create legacy run and jobs (matching manual launch path)
-        legacy_run = LegacyRun.objects.create(directive=legacy_directive, status='pending')
+        legacy_run = LegacyRun.objects.create(
+            directive=legacy_directive,
+            status='pending',
+            directive_snapshot={
+                'id': legacy_directive.id,
+                'name': legacy_directive.name,
+                'description': legacy_directive.description,
+                'task_config': legacy_directive.task_config,
+            }
+        )
 
         # Jobs: single job based on schedule's job task_key
         task_type = schedule.job.task_key
-        LegacyJob.objects.create(run=legacy_run, task_type=task_type, status='pending')
+        legacy_job = LegacyJob.objects.create(run=legacy_run, task_type=task_type, status='pending')
+        queue_item = JobQueueItem.objects.create(job=legacy_job, run=legacy_run)
 
         # Link ScheduledRun entry
         sr = CoreScheduledRun.objects.create(schedule=schedule, run=legacy_run, status='started', started_at=timezone.now())
@@ -230,9 +262,21 @@ class ScheduleViewSet(viewsets.ModelViewSet):
         try:
             from orchestrator.services import OrchestratorService
             orchestrator = OrchestratorService()
-            orchestrator.execute_run(legacy_run)
+            ok = orchestrator.execute_job(legacy_job)
+            if ok:
+                legacy_run.status = 'completed'
+                legacy_run.completed_at = timezone.now()
+                legacy_run.save(update_fields=['status', 'completed_at'])
+            else:
+                legacy_run.status = 'failed'
+                legacy_run.completed_at = timezone.now()
+                legacy_run.error_message = legacy_job.error_message
+                legacy_run.save(update_fields=['status', 'completed_at', 'error_message'])
             sr.status = 'finished'
             sr.finished_at = timezone.now()
+            queue_item.status = 'completed' if ok else 'failed'
+            queue_item.last_error = legacy_job.error_message if not ok else ''
+            queue_item.save(update_fields=['status', 'last_error'])
             sr.save()
         except Exception as e:
             logger.error(f"Run-now execution error: {e}")
@@ -240,6 +284,9 @@ class ScheduleViewSet(viewsets.ModelViewSet):
             sr.error_summary = str(e)
             sr.finished_at = timezone.now()
             sr.save()
+            queue_item.status = 'failed'
+            queue_item.last_error = str(e)
+            queue_item.save(update_fields=['status', 'last_error'])
 
         return Response({'run_id': legacy_run.id}, status=status.HTTP_201_CREATED)
 

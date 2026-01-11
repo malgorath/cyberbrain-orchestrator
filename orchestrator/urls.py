@@ -10,6 +10,7 @@ app_name = 'api'
 
 router = DefaultRouter()
 router.register(r'directives', views.DirectiveViewSet)
+router.register(r'tasks', views.TaskDefinitionViewSet)
 router.register(r'runs', views.RunViewSet)
 router.register(r'jobs', views.JobViewSet)
 router.register(r'containers', views.ContainerAllowlistViewSet)
@@ -37,4 +38,3 @@ urlpatterns = [
     path('metrics/', metrics.metrics_view, name='metrics'),
     path('metrics/json/', metrics.metrics_json_view, name='metrics-json'),
 ]
-

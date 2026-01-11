@@ -28,7 +28,7 @@ class ScheduleApiAcceptanceTests(TestCase):
         # Create schedule via API
         payload = {
             'name': 'Every 5 minutes triage',
-            'job_key': 'log_triage',
+            'task_key': 'log_triage',
             'enabled': True,
             'schedule_type': 'interval',
             'interval_minutes': 5,
@@ -53,7 +53,7 @@ class ScheduleApiAcceptanceTests(TestCase):
     def test_enable_disable_schedule(self):
         payload = {
             'name': 'GPU report hourly',
-            'job_key': 'gpu_report',
+            'task_key': 'gpu_report',
             'enabled': False,
             'schedule_type': 'interval',
             'interval_minutes': 60,
@@ -77,7 +77,7 @@ class ScheduleApiAcceptanceTests(TestCase):
     def test_cron_schedule_creation(self):
         payload = {
             'name': 'Service map nightly',
-            'job_key': 'service_map',
+            'task_key': 'service_map',
             'enabled': True,
             'schedule_type': 'cron',
             'cron_expr': '0 2 * * *',

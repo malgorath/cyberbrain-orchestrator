@@ -78,14 +78,8 @@ class Directive(models.Model):
 
 
 class Job(models.Model):
-    """Job templates for the three core tasks (log triage, GPU report, service map)."""
-    TASK_CHOICES = [
-        ('log_triage', 'Log Triage'),
-        ('gpu_report', 'GPU Report'),
-        ('service_map', 'Service Map'),
-    ]
-
-    task_key = models.CharField(max_length=50, choices=TASK_CHOICES)
+    """Job templates for orchestrator tasks (TaskDefinitions)."""
+    task_key = models.CharField(max_length=50, unique=True)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     default_directive = models.ForeignKey(
@@ -588,6 +582,7 @@ class Schedule(models.Model):
     Supports interval and cron scheduling with optional concurrency controls.
     """
     SCHEDULE_TYPES = [
+        ('one_shot', 'One Shot'),
         ('interval', 'Interval'),
         ('cron', 'Cron'),
     ]
@@ -667,6 +662,9 @@ class Schedule(models.Model):
             else:
                 now = now.astimezone(tz)
 
+        if self.schedule_type == 'one_shot':
+            return self.next_run_at
+
         if self.schedule_type == 'interval':
             minutes = self.interval_minutes or 0
             if minutes <= 0:
@@ -736,6 +734,49 @@ class ScheduledRun(models.Model):
 
     def __str__(self):
         return f"ScheduledRun {self.id} - schedule={self.schedule_id} run={self.run_id} ({self.status})"
+
+
+class JobQueueItem(models.Model):
+    """Queue item for executing a single job exactly once."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('claimed', 'Claimed'),
+        ('running', 'Running'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    job = models.OneToOneField('orchestrator.Job', on_delete=models.CASCADE, related_name='queue_item')
+    run = models.ForeignKey('orchestrator.Run', on_delete=models.CASCADE, related_name='job_queue_items')
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    claimed_until = models.DateTimeField(null=True, blank=True)
+    claimed_by = models.CharField(max_length=255, blank=True)
+    attempts = models.IntegerField(default=0)
+    last_error = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'claimed_until']),
+            models.Index(fields=['run']),
+        ]
+
+    def __str__(self):
+        return f"JobQueueItem {self.id} - job={self.job_id} ({self.status})"
+
+    @classmethod
+    def due(cls):
+        now = timezone.now()
+        return cls.objects.filter(
+            models.Q(status='pending') |
+            models.Q(status='claimed', claimed_until__lte=now)
+        ).filter(
+            models.Q(claimed_until__isnull=True) | models.Q(claimed_until__lte=now)
+        )
 
 
 # ============================================================================

@@ -33,6 +33,12 @@ class Run(models.Model):
     report_markdown = models.TextField(blank=True)
     report_json = models.JSONField(default=dict)
     error_message = models.TextField(blank=True)
+
+    directive_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Snapshot of directive metadata at run creation (no LLM content)"
+    )
     
     # Phase 3: RAG integration toggle
     use_rag = models.BooleanField(
@@ -77,15 +83,8 @@ class Job(models.Model):
         ('failed', 'Failed'),
     ]
 
-    TASK_CHOICES = [
-        ('log_triage', 'Log Triage'),
-        ('gpu_report', 'GPU Report'),
-        ('service_map', 'Service Map'),
-        ('repo_copilot_plan', 'Repo Co-Pilot Plan'),  # Phase 6: Repo Co-Pilot
-    ]
-
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name='jobs')
-    task_type = models.CharField(max_length=50, choices=TASK_CHOICES)
+    task_type = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

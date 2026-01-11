@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import Schedule, ScheduledRun
+from core.models import Schedule, ScheduledRun, JobQueueItem
 from orchestrator.models import Run as LegacyRun, Job as LegacyJob, Directive as LegacyDirective
 from orchestrator.services import OrchestratorService
 
@@ -76,133 +76,114 @@ class Command(BaseCommand):
                 sch.claimed_until = now + timedelta(seconds=claim_ttl)
                 sch.save(update_fields=['claimed_by', 'claimed_until'])
 
-                # Check if this schedule already has a ScheduledRun (from launch API)
-                existing_scheduled_run = ScheduledRun.objects.filter(
+                # Concurrency checks for recurring schedules
+                if not self._can_run(sch):
+                    # Push next run out by small backoff to avoid tight loop
+                    sch.next_run_at = now + timedelta(minutes=1)
+                    # Release claim immediately
+                    sch.claimed_by = ''
+                    sch.claimed_until = None
+                    sch.save(update_fields=['next_run_at', 'claimed_by', 'claimed_until'])
+                    continue
+
+                if not sch.job.is_active:
+                    sch.enabled = False
+                    sch.claimed_by = ''
+                    sch.claimed_until = None
+                    sch.save(update_fields=['enabled', 'claimed_by', 'claimed_until'])
+                    continue
+
+                # Create run + job + queue item
+                legacy_directive = self._resolve_directive(sch)
+                legacy_run = LegacyRun.objects.create(
+                    directive=legacy_directive,
+                    status='pending',
+                    directive_snapshot={
+                        'id': legacy_directive.id,
+                        'name': legacy_directive.name,
+                        'description': legacy_directive.description,
+                        'task_config': legacy_directive.task_config,
+                    }
+                )
+                legacy_job = LegacyJob.objects.create(
+                    run=legacy_run,
+                    task_type=sch.job.task_key,
+                    status='pending'
+                )
+                JobQueueItem.objects.create(job=legacy_job, run=legacy_run)
+
+                # Link scheduled history
+                ScheduledRun.objects.create(
                     schedule=sch,
-                    status__in=['pending']
-                ).select_related('run').first()
+                    run=legacy_run,
+                    status='pending'
+                )
 
-                if existing_scheduled_run:
-                    # Launched run: execute only the specific job for this schedule
-                    # Parse task_type from schedule name: "launch-run-{run_id}-{task_type}"
-                    legacy_run = existing_scheduled_run.run
-                    task_type = self._extract_task_type_from_schedule(sch)
-                    
-                    if not task_type:
-                        logger.error(f"Cannot parse task_type from schedule {sch.id} ({sch.name})")
-                        existing_scheduled_run.status = 'failed'
-                        existing_scheduled_run.finished_at = now
-                        existing_scheduled_run.error_summary = 'Invalid schedule name format'
-                        existing_scheduled_run.save()
-                        sch.enabled = False
-                        sch.save(update_fields=['enabled'])
-                        continue
-                    
-                    # Find the specific job for this task_type
-                    target_job = LegacyJob.objects.filter(
-                        run=legacy_run,
-                        task_type=task_type
-                    ).first()
-                    
-                    if not target_job:
-                        logger.error(f"Job {task_type} not found for run {legacy_run.id}")
-                        existing_scheduled_run.status = 'failed'
-                        existing_scheduled_run.finished_at = now
-                        existing_scheduled_run.error_summary = f'Job {task_type} not found'
-                        existing_scheduled_run.save()
-                        sch.enabled = False
-                        sch.save(update_fields=['enabled'])
-                        continue
-                    
-                    # Check if job already completed/failed (prevent duplicate execution)
-                    if target_job.status in ['completed', 'failed']:
-                        logger.info(f"Job {target_job.id} ({task_type}) already {target_job.status}, skipping")
-                        existing_scheduled_run.status = 'finished'
-                        existing_scheduled_run.finished_at = now
-                        existing_scheduled_run.save()
-                        sch.enabled = False
-                        sch.save(update_fields=['enabled'])
-                        continue
-                    
-                    logger.info(f"Executing job {target_job.id} ({task_type}) for run {legacy_run.id}")
-                    existing_scheduled_run.status = 'started'
-                    existing_scheduled_run.started_at = now
-                    existing_scheduled_run.save(update_fields=['status', 'started_at'])
-                else:
-                    # Concurrency checks for recurring schedules
-                    if not self._can_run(sch):
-                        # Push next run out by small backoff to avoid tight loop
-                        sch.next_run_at = now + timedelta(minutes=1)
-                        # Release claim immediately
-                        sch.claimed_by = ''
-                        sch.claimed_until = None
-                        sch.save(update_fields=['next_run_at', 'claimed_by', 'claimed_until'])
-                        continue
-
-                    # Recurring schedule: create new run
-                    legacy_directive = self._resolve_directive(sch)
-                    legacy_run = LegacyRun.objects.create(directive=legacy_directive, status='pending')
-                    LegacyJob.objects.create(run=legacy_run, task_type=sch.job.task_key, status='pending')
-
-                    # Link scheduled history
-                    existing_scheduled_run = ScheduledRun.objects.create(
-                        schedule=sch,
-                        run=legacy_run,
-                        status='started',
-                        started_at=now
-                    )
-
-                # Disable schedule after execution (one-shot queue item)
-                sch.enabled = False
+                # Update schedule for next run
                 sch.last_run_at = now
-                sch.save(update_fields=['enabled', 'last_run_at'])
-
-                # Execute job or run
-                try:
-                    if existing_scheduled_run and task_type:
-                        # Execute single job
-                        logger.info(f"Executing job {target_job.id} ({task_type}) for schedule {sch.id}")
-                        ok = orchestrator.execute_job(target_job)
-                        logger.info(f"Job {target_job.id} execution {'succeeded' if ok else 'failed'}")
-                        
-                        # Update run status based on all jobs
-                        self._update_run_status(legacy_run)
-                        
-                        if existing_scheduled_run:
-                            existing_scheduled_run.status = 'finished' if ok else 'failed'
-                            existing_scheduled_run.finished_at = timezone.now()
-                            if not ok:
-                                existing_scheduled_run.error_summary = target_job.error_message or 'Job failed'
-                            existing_scheduled_run.save()
-                    else:
-                        # Execute entire run (recurring schedules)
-                        logger.info(f"Executing run {legacy_run.id} for schedule {sch.id} ({sch.name})")
-                        ok = orchestrator.execute_run(legacy_run)
-                        logger.info(f"Run {legacy_run.id} execution {'succeeded' if ok else 'failed'}")
-                        if existing_scheduled_run:
-                            existing_scheduled_run.status = 'finished' if ok else 'failed'
-                            existing_scheduled_run.finished_at = timezone.now()
-                            if not ok:
-                                existing_scheduled_run.error_summary = legacy_run.error_message or 'Run failed'
-                            existing_scheduled_run.save()
-                except Exception as e:
-                    logger.error(f"Run execution error for schedule {sch.id}: {e}", exc_info=True)
-                    if existing_scheduled_run:
-                        existing_scheduled_run.status = 'failed'
-                        existing_scheduled_run.finished_at = timezone.now()
-                        existing_scheduled_run.error_summary = str(e)
-                        existing_scheduled_run.save()
+                if sch.schedule_type == 'one_shot':
+                    sch.enabled = False
+                    sch.next_run_at = None
+                else:
+                    sch.compute_next_run(from_time=now)
 
                 # Release claim now that scheduling work is complete
                 sch.claimed_by = ''
                 sch.claimed_until = None
-                sch.save(update_fields=['claimed_by', 'claimed_until'])
+                sch.save(update_fields=['enabled', 'last_run_at', 'next_run_at', 'claimed_by', 'claimed_until'])
+
+        # Process due job queue items
+        queue_items = []
+        with transaction.atomic():
+            due_items = JobQueueItem.due().select_for_update(skip_locked=True)[:max_claim]
+            queue_items = list(due_items)
+            for item in queue_items:
+                item.status = 'claimed'
+                item.attempts += 1
+                item.claimed_by = claimant
+                item.claimed_until = now + timedelta(seconds=claim_ttl)
+                item.save(update_fields=['status', 'attempts', 'claimed_by', 'claimed_until'])
+
+        for item in queue_items:
+            job = item.job
+            run = item.run
+
+            if job.status in ['completed', 'failed']:
+                item.status = 'completed'
+                item.claimed_by = ''
+                item.claimed_until = None
+                item.save(update_fields=['status', 'claimed_by', 'claimed_until'])
+                continue
+
+            try:
+                if run.status == 'pending':
+                    run.status = 'running'
+                    run.save(update_fields=['status'])
+
+                item.status = 'running'
+                item.save(update_fields=['status'])
+                ok = orchestrator.execute_job(job)
+                item.status = 'completed' if ok else 'failed'
+                item.last_error = job.error_message if not ok else ''
+                item.claimed_by = ''
+                item.claimed_until = None
+                item.save(update_fields=['status', 'last_error', 'claimed_by', 'claimed_until'])
+                self._update_run_status(run)
+            except Exception as e:
+                logger.error(f"Job execution error for queue item {item.id}: {e}", exc_info=True)
+                item.status = 'failed'
+                item.last_error = str(e)
+                item.claimed_by = ''
+                item.claimed_until = None
+                item.save(update_fields=['status', 'last_error', 'claimed_by', 'claimed_until'])
+                self._update_run_status(run)
 
     def _resolve_directive(self, sch: Schedule):
         # Prefer core directive mapped by name; otherwise derive from schedule
-        name = sch.directive.name if sch.directive else f"schedule:{sch.name}"
-        desc = (sch.directive.description if sch.directive else sch.custom_directive_text[:500]) or ''
-        defaults = {'description': desc, 'task_config': sch.directive.task_config if sch.directive else {}}
+        core_directive = sch.directive or sch.job.default_directive
+        name = core_directive.name if core_directive else f"schedule:{sch.name}"
+        desc = (core_directive.description if core_directive else sch.custom_directive_text[:500]) or ''
+        defaults = {'description': desc, 'task_config': core_directive.task_config if core_directive else {}}
         directive, _ = LegacyDirective.objects.get_or_create(name=name, defaults=defaults)
         return directive
 
@@ -217,15 +198,6 @@ class Command(BaseCommand):
         if sch.max_per_job is not None and job_running >= sch.max_per_job:
             return False
         return True
-    
-    def _extract_task_type_from_schedule(self, sch: Schedule) -> str:
-        """Extract task_type from schedule name (format: launch-run-{id}-{task_type})."""
-        if not sch.name.startswith('launch-run-'):
-            return None
-        parts = sch.name.split('-', 3)  # ['launch', 'run', '{id}', '{task_type}']
-        if len(parts) >= 4:
-            return parts[3]
-        return None
     
     def _update_run_status(self, run: LegacyRun):
         """Update run status based on all jobs' statuses."""
