@@ -199,9 +199,25 @@ class ScheduleViewSet(viewsets.ModelViewSet):
         schedule = self.get_object()
         from orchestrator.models import Directive as LegacyDirective, Run as LegacyRun, Job as LegacyJob
 
-        # Resolve directive: prefer core directive, else create legacy directive from custom text
+        # Resolve directive: prefer job default directive, then run directive, then custom text, else fallback
         legacy_directive = None
-        if schedule.directive:
+        if schedule.job and schedule.job.default_directive:
+            legacy_directive, _ = LegacyDirective.objects.get_or_create(
+                name=schedule.job.default_directive.name,
+                defaults={
+                    'description': schedule.job.default_directive.description or 'Imported from core directive',
+                    'task_config': schedule.job.default_directive.task_config or {},
+                }
+            )
+        elif getattr(schedule, "run", None) and schedule.run.directive:
+            legacy_directive, _ = LegacyDirective.objects.get_or_create(
+                name=schedule.run.directive.name,
+                defaults={
+                    'description': schedule.run.directive.description or 'Imported from run directive',
+                    'task_config': schedule.run.directive.task_config or {},
+                }
+            )
+        elif schedule.directive:
             # Map core directive to legacy directive by name, create if missing
             legacy_directive, _ = LegacyDirective.objects.get_or_create(
                 name=schedule.directive.name,
@@ -223,15 +239,6 @@ class ScheduleViewSet(viewsets.ModelViewSet):
             # Fallback to a default directive
             legacy_directive, _ = LegacyDirective.objects.get_or_create(
                 name='default', defaults={'description': 'Default orchestrator directive'}
-            )
-
-        elif schedule.job.default_directive:
-            legacy_directive, _ = LegacyDirective.objects.get_or_create(
-                name=schedule.job.default_directive.name,
-                defaults={
-                    'description': schedule.job.default_directive.description or 'Imported from core directive',
-                    'task_config': schedule.job.default_directive.task_config or {},
-                }
             )
         # Create legacy run and jobs (matching manual launch path)
         legacy_run = LegacyRun.objects.create(
