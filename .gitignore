@@ -211,3 +211,7 @@ logs/
 uploads/
 staticfiles/
 orchestrator.log
+
+# local python env
+.venv/
+venv/
