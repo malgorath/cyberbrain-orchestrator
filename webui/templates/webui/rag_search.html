@@ -1,125 +1,100 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RAG Search</title>
-  <style>
-    body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
-    h1 { margin-bottom: 10px; }
-    .search-section { margin-bottom: 30px; padding: 20px; background: #f9f9f9; border: 1px solid #ddd; }
-    .search-section input[type="text"] { width: 70%; padding: 8px; margin-right: 10px; }
-    .search-section input[type="number"] { width: 80px; padding: 8px; margin-right: 10px; }
-    button { padding: 8px 16px; cursor: pointer; }
-    .results-section { margin-top: 30px; }
-    .result-card { padding: 15px; margin-bottom: 15px; border: 1px solid #ddd; background: #fff; }
-    .result-header { font-weight: bold; color: #1976d2; margin-bottom: 5px; }
-    .result-score { color: #666; font-size: 0.9em; }
-    .result-text { margin-top: 10px; line-height: 1.6; }
-    .result-meta { margin-top: 10px; font-size: 0.85em; color: #666; }
-    .no-results { padding: 20px; text-align: center; color: #666; }
-    .nav { margin-bottom: 20px; }
-    .nav a { margin-right: 15px; text-decoration: none; color: #1976d2; }
-    .status-msg { margin-top: 10px; padding: 10px; border-radius: 4px; }
-    .status-msg.info { background: #e3f2fd; color: #1976d2; }
-    .status-msg.error { background: #ffebee; color: #c62828; }
-  </style>
-</head>
-<body>
-  <div class="nav">
-    <a href="/webui/schedules/">Schedules</a>
-    <a href="/webui/rag/upload/">RAG Upload</a>
-    <a href="/webui/rag/search/">RAG Search</a>
-  </div>
-
-  <h1>RAG Search</h1>
-  
-  <div class="search-section">
-    <h2>Query Documents</h2>
-    <div style="margin-bottom: 15px;">
-      <input type="text" id="queryInput" placeholder="Enter your search query..." />
-      <label>Top K:</label>
-      <input type="number" id="topKInput" value="5" min="1" max="50" />
-      <button onclick="search()">Search</button>
+{% extends "base.html" %}
+{% block title %}RAG Search{% endblock %}
+{% block content %}
+  <div class="section">
+    <h2>RAG Search</h2>
+    <div class="panel">
+      <h3>Query Documents</h3>
+      <div class="grid">
+        <div>
+          {% include "partials/form_field.html" with field_id="queryInput" label="Query" field_html="<input type='text' id='queryInput' placeholder='Enter your search query...' />" %}
+        </div>
+        <div>
+          {% include "partials/form_field.html" with field_id="topKInput" label="Top K" field_html="<input type='number' id='topKInput' value='5' min='1' max='50' />" %}
+        </div>
+      </div>
+      <div class="button-group">
+        <button onclick="search()">Search</button>
+      </div>
+      <div id="searchStatus"></div>
     </div>
-    <div id="searchStatus"></div>
   </div>
 
-  <div class="results-section">
+  <div class="section">
     <h2>Results</h2>
-    <div id="resultsContainer">
-      <div class="no-results">Enter a query above to search.</div>
+    <div id="resultsContainer" class="panel">
+      <div class="empty-state">Enter a query above to search.</div>
     </div>
   </div>
+{% endblock %}
 
+{% block scripts %}
   <script>
     async function search() {
       const query = document.getElementById('queryInput').value.trim();
       const topK = parseInt(document.getElementById('topKInput').value) || 5;
       const statusDiv = document.getElementById('searchStatus');
       const resultsDiv = document.getElementById('resultsContainer');
-      
+
       if (!query) {
-        statusDiv.innerHTML = '<div class="status-msg error">Please enter a query</div>';
+        statusDiv.innerHTML = '<div class="alert alert-error">Please enter a query</div>';
         return;
       }
-      
-      statusDiv.innerHTML = '<div class="status-msg info">Searching...</div>';
-      resultsDiv.innerHTML = '<div class="no-results">Loading...</div>';
-      
+
+      statusDiv.innerHTML = '<div class="alert alert-info">Searching...</div>';
+      resultsDiv.innerHTML = '<div class="loading">Loading...</div>';
+
       try {
         const res = await fetch('/api/rag/search/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query_text: query, top_k: topK })
         });
-        
+
         if (!res.ok) {
           throw new Error(`Search failed: ${res.status} ${res.statusText}`);
         }
-        
+
         const data = await res.json();
         const results = data.results || [];
-        
-        statusDiv.innerHTML = `<div class="status-msg info">Found ${results.length} results (query hash: ${data.query_hash?.substring(0, 8)}...)</div>`;
-        
+
+        statusDiv.innerHTML = `<div class="alert alert-info">Found ${results.length} results (query hash: ${data.query_hash?.substring(0, 8)}...)</div>`;
+
         if (results.length === 0) {
-          resultsDiv.innerHTML = '<div class="no-results">No results found. Try a different query or upload more documents.</div>';
+          resultsDiv.innerHTML = '<div class="empty-state">No results found. Try a different query or upload more documents.</div>';
           return;
         }
-        
+
         const cards = results.map((r, idx) => `
-          <div class="result-card">
-            <div class="result-header">#${idx + 1}: ${r.document_title || 'Untitled'}</div>
-            <div class="result-score">Score: ${r.score.toFixed(4)}</div>
-            <div class="result-text">${escapeHtml(r.chunk_text)}</div>
-            <div class="result-meta">
-              Document ID: ${r.document_id} | 
-              Chunk ID: ${r.chunk_id} | 
-              Chunk Index: ${r.chunk_index} | 
+          <div class="card">
+            <div><strong>#${idx + 1}: ${r.document_title || 'Untitled'}</strong></div>
+            <div class="form-help">Score: ${r.score.toFixed(4)}</div>
+            <div class="panel" style="margin-top: 10px;">${escapeHtml(r.chunk_text)}</div>
+            <div class="form-help">
+              Document ID: ${r.document_id} |
+              Chunk ID: ${r.chunk_id} |
+              Chunk Index: ${r.chunk_index} |
               Source: ${r.document_source || 'N/A'}
             </div>
           </div>
         `).join('');
-        
+
         resultsDiv.innerHTML = cards;
-        
+
       } catch (err) {
-        statusDiv.innerHTML = `<div class="status-msg error">Error: ${err.message}</div>`;
-        resultsDiv.innerHTML = '<div class="no-results">Search failed. Please try again.</div>';
+        statusDiv.innerHTML = `<div class="alert alert-error">Error: ${err.message}</div>`;
+        resultsDiv.innerHTML = '<div class="empty-state">Search failed. Please try again.</div>';
       }
     }
-    
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
     }
-    
-    // Allow Enter key to trigger search
+
     document.getElementById('queryInput').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') search();
     });
   </script>
-</body>
-</html>
+{% endblock %}

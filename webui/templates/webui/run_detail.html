@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Run Detail{% endblock %}
+{% block content %}
+  <div class="section" data-run-id="{{ run_id }}" id="runDetail">
+    <h2>Run #{{ run_id }}</h2>
+    <div class="panel" id="summaryPanel">
+      <div class="loading">Loading summary...</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Jobs</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Task</th><th>Status</th><th>Started</th><th>Completed</th>
+          </tr>
+        </thead>
+        <tbody id="jobsRows">
+          <tr><td colspan="5">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Report</h2>
+    <div class="report-area" id="reportArea">
+      <div class="loading">Loading report...</div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const runId = document.getElementById('runDetail').dataset.runId;
+
+    async function loadSummary() {
+      const res = await fetch(`/api/runs/${runId}/`);
+      if (!res.ok) {
+        document.getElementById('summaryPanel').innerHTML = '<div class="alert alert-error">Failed to load run.</div>';
+        return;
+      }
+      const run = await res.json();
+      document.getElementById('summaryPanel').innerHTML = `
+        <div><strong>Directive:</strong> ${run.directive_name || 'default'}</div>
+        <div><strong>Status:</strong> <span class="badge status-${run.status}">${run.status}</span></div>
+        <div><strong>Started:</strong> ${run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</div>
+        <div><strong>Completed:</strong> ${run.completed_at ? new Date(run.completed_at).toLocaleString() : '-'}</div>
+      `;
+    }
+
+    async function loadJobs() {
+      const res = await fetch(`/api/runs/${runId}/jobs/`);
+      const data = await res.json();
+      const rows = data.map(j => `
+        <tr>
+          <td>${j.id}</td>
+          <td>${j.task_type}</td>
+          <td><span class="badge status-${j.status}">${j.status}</span></td>
+          <td>${j.started_at ? new Date(j.started_at).toLocaleString() : '-'}</td>
+          <td>${j.completed_at ? new Date(j.completed_at).toLocaleString() : '-'}</td>
+        </tr>
+      `).join('');
+      document.getElementById('jobsRows').innerHTML = rows || '<tr><td colspan="5">No jobs found</td></tr>';
+    }
+
+    async function loadReport() {
+      const res = await fetch(`/api/runs/${runId}/report/`);
+      if (!res.ok) {
+        document.getElementById('reportArea').innerHTML = '<div class="alert alert-error">Failed to load report.</div>';
+        return;
+      }
+      const data = await res.json();
+      let reportHtml = '<div class="report-content">';
+      if (data.markdown) {
+        reportHtml += '<h4>Markdown Report:</h4>';
+        reportHtml += `<pre>${escapeHtml(data.markdown)}</pre>`;
+      }
+      if (data.json && Object.keys(data.json).length > 0) {
+        reportHtml += '<h4>JSON Report:</h4>';
+        reportHtml += `<pre>${JSON.stringify(data.json, null, 2)}</pre>`;
+      }
+      if (!data.markdown && (!data.json || Object.keys(data.json).length === 0)) {
+        reportHtml += '<p>No report data available yet.</p>';
+      }
+      reportHtml += '</div>';
+      document.getElementById('reportArea').innerHTML = reportHtml;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadSummary();
+    loadJobs();
+    loadReport();
+  </script>
+{% endblock %}

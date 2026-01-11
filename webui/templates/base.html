@@ -1,0 +1,27 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Cyberbrain Orchestrator{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'webui/app.css' %}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧠 Cyberbrain Orchestrator</h1>
+            <p>Docker Container Orchestration Dashboard</p>
+        </header>
+        <div class="content">
+            {% block nav %}{% include 'partials/nav.html' %}{% endblock %}
+            {% include 'partials/flash_messages.html' %}
+            {% block page_header %}{% endblock %}
+            {% block content %}{% endblock %}
+        </div>
+        {% block footer %}{% include 'partials/footer.html' %}{% endblock %}
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

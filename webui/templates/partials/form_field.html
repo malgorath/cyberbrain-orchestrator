@@ -1,0 +1,7 @@
+<div class="form-field">
+    <label for="{{ field_id }}">{{ label }}</label>
+    {{ field_html|safe }}
+    {% if help_text %}
+        <div class="form-help">{{ help_text }}</div>
+    {% endif %}
+</div>

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Container Allowlist{% endblock %}
+{% block content %}
+  <div class="section">
+    <h2>Container Allowlist</h2>
+    <div class="grid">
+      <div class="panel">
+        <h3 id="form-title">Create Allowlist Entry</h3>
+        <input type="hidden" id="entry-id" />
+        {% include "partials/form_field.html" with field_id="container_id" label="Container ID" field_html="<input id='container_id' placeholder='abc123' />" %}
+        {% include "partials/form_field.html" with field_id="name" label="Name" field_html="<input id='name' placeholder='app-service' />" %}
+        {% include "partials/form_field.html" with field_id="description" label="Description" field_html="<textarea id='description' placeholder='Container purpose'></textarea>" %}
+        {% include "partials/form_field.html" with field_id="is_active" label="Enabled" field_html="<select id='is_active'><option value='true' selected>True</option><option value='false'>False</option></select>" %}
+        <div class="button-group">
+          <button onclick="saveEntry()">Save</button>
+          <button class="btn-outline" onclick="resetForm()">Reset</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="button-group">
+          <button class="btn-secondary" onclick="refresh()">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Container ID</th><th>Name</th><th>Enabled</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    async function refresh() {
+      const res = await fetch('/api/containers/');
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.results || []);
+      const rows = items.map(x => `
+        <tr>
+          <td>${x.id}</td>
+          <td>${x.container_id}</td>
+          <td>${x.name}</td>
+          <td>${x.is_active}</td>
+          <td>
+            <button class="btn-secondary btn-sm" onclick='loadEntry(${JSON.stringify(x)})'>Edit</button>
+            <button class="btn-outline btn-sm" onclick="toggle(${x.id}, ${x.is_active})">${x.is_active ? 'Disable' : 'Enable'}</button>
+          </td>
+        </tr>`).join('');
+      document.getElementById('rows').innerHTML = rows || '<tr><td colspan="5">No entries</td></tr>';
+    }
+
+    function loadEntry(entry) {
+      document.getElementById('form-title').innerText = 'Edit Allowlist Entry';
+      document.getElementById('entry-id').value = entry.id;
+      document.getElementById('container_id').value = entry.container_id;
+      document.getElementById('name').value = entry.name;
+      document.getElementById('description').value = entry.description || '';
+      document.getElementById('is_active').value = String(entry.is_active);
+    }
+
+    function resetForm() {
+      document.getElementById('form-title').innerText = 'Create Allowlist Entry';
+      document.getElementById('entry-id').value = '';
+      document.getElementById('container_id').value = '';
+      document.getElementById('name').value = '';
+      document.getElementById('description').value = '';
+      document.getElementById('is_active').value = 'true';
+    }
+
+    async function saveEntry() {
+      const id = document.getElementById('entry-id').value;
+      const payload = {
+        container_id: document.getElementById('container_id').value.trim(),
+        name: document.getElementById('name').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        is_active: document.getElementById('is_active').value === 'true',
+      };
+
+      const url = id ? `/api/containers/${id}/` : '/api/containers/';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        resetForm();
+        refresh();
+      } else {
+        const err = await res.json();
+        alert(JSON.stringify(err));
+      }
+    }
+
+    async function toggle(id, enabled) {
+      const res = await fetch(`/api/containers/${id}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !enabled }),
+      });
+      if (res.ok) refresh();
+    }
+
+    refresh();
+  </script>
+{% endblock %}

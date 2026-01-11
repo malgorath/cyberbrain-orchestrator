@@ -1,71 +1,47 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Schedules</title>
-  <style>
-    body { font-family: system-ui, Arial, sans-serif; padding: 20px; }
-    h1 { margin-bottom: 10px; }
-    .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
-    label { display: block; margin-top: 8px; font-weight: 600; }
-    input, textarea, select { width: 100%; padding: 6px; }
-    textarea { height: 70px; }
-    button { margin-right: 10px; margin-top: 8px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #ddd; padding: 8px; }
-    th { background: #f5f5f5; }
-  </style>
-</head>
-<body>
-  <h1>Schedules</h1>
-  <div class="grid">
-    <div>
-      <h3 id="form-title">Create Schedule</h3>
-      <input type="hidden" id="schedule-id" />
-      <label>Name</label>
-      <input id="name" placeholder="triage-every-5" />
-      <label>Task</label>
-      <select id="task_id"></select>
-      <label>Type</label>
-      <select id="schedule_type" onchange="toggleScheduleFields()">
-        <option value="one_shot">one_shot</option>
-        <option value="interval" selected>interval</option>
-        <option value="cron">cron</option>
-      </select>
-      <label>Interval Minutes</label>
-      <input id="interval_minutes" type="number" min="1" />
-      <label>Cron Expr</label>
-      <input id="cron_expr" placeholder="0 */2 * * *" />
-      <label>Timezone</label>
-      <input id="timezone" value="UTC" />
-      <label>Enabled</label>
-      <select id="enabled">
-        <option value="true" selected>True</option>
-        <option value="false">False</option>
-      </select>
-      <label>Next Run At (one_shot only, ISO)</label>
-      <input id="next_run_at" placeholder="2025-01-10T12:00:00Z" />
-      <button onclick="saveSchedule()">Save</button>
-      <button onclick="resetForm()">Reset</button>
-    </div>
-    <div>
-      <div class="actions">
-        <button onclick="refresh()">Refresh</button>
+{% extends "base.html" %}
+{% block title %}Schedules{% endblock %}
+{% block content %}
+  <div class="section">
+    <h2>Schedules</h2>
+    <div class="grid">
+      <div class="panel">
+        <h3 id="form-title">Create Schedule</h3>
+        <input type="hidden" id="schedule-id" />
+        {% include "partials/form_field.html" with field_id="name" label="Name" field_html="<input id='name' placeholder='triage-every-5' />" %}
+        {% include "partials/form_field.html" with field_id="task_id" label="Task" field_html="<select id='task_id'></select>" %}
+        {% include "partials/form_field.html" with field_id="schedule_type" label="Type" field_html="<select id='schedule_type' onchange='toggleScheduleFields()'><option value='one_shot'>one_shot</option><option value='interval' selected>interval</option><option value='cron'>cron</option></select>" %}
+        {% include "partials/form_field.html" with field_id="interval_minutes" label="Interval Minutes" field_html="<input id='interval_minutes' type='number' min='1' />" %}
+        {% include "partials/form_field.html" with field_id="cron_expr" label="Cron Expr" field_html="<input id='cron_expr' placeholder='0 */2 * * *' />" %}
+        {% include "partials/form_field.html" with field_id="timezone" label="Timezone" field_html="<input id='timezone' value='UTC' />" %}
+        {% include "partials/form_field.html" with field_id="enabled" label="Enabled" field_html="<select id='enabled'><option value='true' selected>True</option><option value='false'>False</option></select>" %}
+        {% include "partials/form_field.html" with field_id="next_run_at" label="Next Run At (one_shot only, ISO)" field_html="<input id='next_run_at' placeholder='2025-01-10T12:00:00Z' />" %}
+        <div class="button-group">
+          <button onclick="saveSchedule()">Save</button>
+          <button class="btn-outline" onclick="resetForm()">Reset</button>
+        </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th><th>Name</th><th>Task</th><th>Type</th><th>Next Run</th><th>Enabled</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="rows">
-          <tr><td colspan="7">Loading...</td></tr>
-        </tbody>
-      </table>
+      <div class="panel">
+        <div class="button-group">
+          <button class="btn-secondary" onclick="refresh()">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Name</th><th>Task</th><th>Type</th><th>Next Run</th><th>Enabled</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr><td colspan="7">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
+{% endblock %}
 
+{% block scripts %}
   <script>
     async function refresh() {
       await loadTasks();
@@ -81,9 +57,9 @@
           <td>${x.next_run_at || ''}</td>
           <td>${x.enabled}</td>
           <td>
-            <button onclick="runNow(${x.id})">Run Now</button>
-            <button onclick="toggle(${x.id}, ${x.enabled})">${x.enabled ? 'Disable' : 'Enable'}</button>
-            <button onclick='loadSchedule(${JSON.stringify(x)})'>Edit</button>
+            <button class="btn-secondary btn-sm" onclick="runNow(${x.id})">Run Now</button>
+            <button class="btn-outline btn-sm" onclick="toggle(${x.id}, ${x.enabled})">${x.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="btn btn-sm" onclick='loadSchedule(${JSON.stringify(x)})'>Edit</button>
           </td>
         </tr>`).join('');
       document.getElementById('rows').innerHTML = rows || '<tr><td colspan="7">No schedules</td></tr>';
@@ -172,5 +148,4 @@
 
     refresh();
   </script>
-</body>
-</html>
+{% endblock %}

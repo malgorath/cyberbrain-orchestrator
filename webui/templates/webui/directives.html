@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Directives{% endblock %}
+{% block content %}
+  <div class="section">
+    <h2>Directives</h2>
+    <div class="grid">
+      <div class="panel">
+        <h3 id="form-title">Create Directive</h3>
+        <input type="hidden" id="directive-id" />
+        {% include "partials/form_field.html" with field_id="name" label="Name" field_html="<input id='name' placeholder='default' />" %}
+        {% include "partials/form_field.html" with field_id="description" label="Description" field_html="<textarea id='description' placeholder='Directive description'></textarea>" %}
+        {% include "partials/form_field.html" with field_id="task_config" label="Task Config (JSON)" field_html="<textarea id='task_config' placeholder='{\"since_last_successful_run\": true}'></textarea>" %}
+        <div class="button-group">
+          <button onclick="saveDirective()">Save</button>
+          <button class="btn-outline" onclick="resetForm()">Reset</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="button-group">
+          <button class="btn-secondary" onclick="refresh()">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Name</th><th>Description</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr><td colspan="4">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    async function refresh() {
+      const res = await fetch('/api/directives/');
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.results || []);
+      const rows = items.map(x => `
+        <tr>
+          <td>${x.id}</td>
+          <td>${x.name}</td>
+          <td>${x.description || ''}</td>
+          <td>
+            <button class="btn-secondary btn-sm" onclick='loadDirective(${JSON.stringify(x)})'>Edit</button>
+          </td>
+        </tr>`).join('');
+      document.getElementById('rows').innerHTML = rows || '<tr><td colspan="4">No directives</td></tr>';
+    }
+
+    function loadDirective(directive) {
+      document.getElementById('form-title').innerText = 'Edit Directive';
+      document.getElementById('directive-id').value = directive.id;
+      document.getElementById('name').value = directive.name;
+      document.getElementById('description').value = directive.description || '';
+      document.getElementById('task_config').value = JSON.stringify(directive.task_config || {}, null, 2);
+    }
+
+    function resetForm() {
+      document.getElementById('form-title').innerText = 'Create Directive';
+      document.getElementById('directive-id').value = '';
+      document.getElementById('name').value = '';
+      document.getElementById('description').value = '';
+      document.getElementById('task_config').value = '';
+    }
+
+    async function saveDirective() {
+      const id = document.getElementById('directive-id').value;
+      const payload = {
+        name: document.getElementById('name').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        task_config: parseJson(document.getElementById('task_config').value || '{}'),
+      };
+
+      const url = id ? `/api/directives/${id}/` : '/api/directives/';
+      const method = id ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        resetForm();
+        refresh();
+      } else {
+        const err = await res.json();
+        alert(JSON.stringify(err));
+      }
+    }
+
+    function parseJson(text) {
+      try { return JSON.parse(text); } catch (e) { return {}; }
+    }
+
+    refresh();
+  </script>
+{% endblock %}
